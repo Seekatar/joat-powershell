@@ -1,9 +1,31 @@
 Set-StrictMode -Version Latest
 
-$script:logName = $null
-$script:startTime = $null
-$script:timestamp = $false
-$script:timestampFormat = $null
+if ( (Get-Variable _logger_logName -Scope Global -ErrorAction SilentlyContinue) -and (Test-Path $global:_logger_logName) )
+{
+    $script:logName = $global:_logger_logName
+    $script:timestamp = $global:_logger_timestamp
+    $script:timestampFormat = $global:_logger_timeFormat
+    #Write-Warning "Logger using global settings of '$script:logName' '$script:timestamp' '$script:timestampFormat'"
+}
+else
+{
+    $script:logName = $null
+    $script:startTime = $null
+    $script:timestamp = $false
+    $script:timestampFormat = $null
+}
+
+function Get-LoggerSettings
+{
+	$script:logName,$script:timestamp,$script:timestampFormat
+}
+
+function Set-LoggerSettings($logName,$timestamp,$timestampFormat)
+{
+	$script:logName = $logName
+	$script:timestamp = $timestamp
+	$script:timestampFormat = $timestampFormat
+}
 
 <#
 .Synopsis
@@ -219,11 +241,7 @@ process
 		$message = "" # allow blank lines
 	}
 	
-	$prefix = ""
-	if ( $level -ne "Info" )
-	{ 
-		$prefix = "$($level.ToUpper()): "
-	}
+	$prefix = "[$($level.ToUpper())] "
 	
 	try
 	{

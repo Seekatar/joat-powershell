@@ -6,7 +6,7 @@ Import-Module (Join-Path $PSScriptRoot Logger.psm1) -Verbose:$false
 $_dataAdded = { 
 					try
 					{
-				        if ($sender)
+				        if ($sender -and $sender[$event.SourceEventArgs.Index] -ne $null)
 						{
 				            $event.MessageData.LogList.Enqueue((New-PooledLogItem $sender[$event.SourceEventArgs.Index] $event.MessageData))
 						}
@@ -21,7 +21,7 @@ $_dataAdded = {
 $_outputDataAdded = {  
 						try
 						{
-							if ( $sender )
+							if ( $sender -and $sender[$event.SourceEventArgs.Index] -ne $null)
 							{ 
 								$event.MessageData.LogList.Enqueue((New-PooledLogItem $sender[$event.sourceEventArgs.Index] $event.MessageData))
 								if ( $event.MessageData.PassThru )
@@ -659,6 +659,14 @@ begin
     if($ImportModules)
     {
         $InitialSessionState.ImportPSModule($ImportModules) | Out-Null
+		if ( [bool]($ImportModules | Where-Object { $_ -eq (Join-Path $PSScriptRoot "logger.psm1") }))
+        {
+			$fileName, $timeStamp, $timeFormat = Get-LoggerSettings
+			#Write-Warning "Exporting $fileName"
+    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_logName", $fileName, "fileName for Logger") )
+    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_timestamp", $timeStamp, "timeStamp for Logger") )
+    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_timeFormat", $timeFormat ,"timeFormat for Logger") )
+        }
     }
 
     $pool = [RunspaceFactory]::CreateRunspacePool($MinimumThreads, $MaximumThreads, $InitialSessionState, $Host)
@@ -748,7 +756,7 @@ end
 
         foreach( $p in $pooledScripts)
         {
-            $posh = [PowerShell]::Create().AddScript( $p.ScriptBlock) 
+            $posh = [PowerShell]::Create().AddScript($p.ScriptBlock) 
             if ( $p.ArgumentList )
 			{
 				$posh.AddParameters($p.ArgumentList ) | Out-Null
