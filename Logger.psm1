@@ -1,35 +1,47 @@
 Set-StrictMode -Version Latest
 
-if ( (Get-Variable _logger_logName -Scope Global -ErrorAction SilentlyContinue) -and (Test-Path $global:_logger_logName) )
+$script:startTime = $null
+$script:backGroundId = $null
+
+if ( (Get-Variable _logger_logName -Scope Global -ErrorAction Ignore) -and (Test-Path $global:_logger_logName) )
 {
-    $script:logName = $global:_logger_logName
     $script:timestamp = $global:_logger_timestamp
     $script:timestampFormat = $global:_logger_timeFormat
+	$script:includeDebugInFile = $global:_logger_includeDebugInFile 
+	$script:backGroundId = [Guid]::NewGuid().ToString()
+    $script:logName = "$global:_logger_logName$script:backgroundId"
+
     #Write-Warning "Logger using global settings of '$script:logName' '$script:timestamp' '$script:timestampFormat'"
 }
 else
 {
     $script:logName = $null
-    $script:startTime = $null
     $script:timestamp = $false
     $script:timestampFormat = $null
-}
-
-function Get-LoggerSettings
-{
-	$script:logName,$script:timestamp,$script:timestampFormat
-}
-
-function Set-LoggerSettings($logName,$timestamp,$timestampFormat)
-{
-	$script:logName = $logName
-	$script:timestamp = $timestamp
-	$script:timestampFormat = $timestampFormat
+	$script:includeDebugInFile = $false
 }
 
 <#
 .Synopsis
-	Start logging to a file
+	Get the settings currently used by the logger
+	
+.Outputs
+	logname, timestamp (bool), timestampFormat, includeDebugInFile
+
+#>
+function Get-LoggingConfig
+{
+	$script:logName,$script:timestamp,$script:timestampFormat,$script:includeDebugInFile
+}
+
+<#
+.Synopsis
+	Sets the settings for the logger, usually just use the Start-Logging
+	
+.Description
+	This is usually used when nesting logging in where another RunSpace or
+	PowerShell prompt should use the same log file.  This sets the settings
+	like the constructor, but does not emit the header
 	
 .Parameter logFileName
 	the fully qualified path to a log file
@@ -43,8 +55,46 @@ function Set-LoggerSettings($logName,$timestamp,$timestampFormat)
 .Parameter append
 	set to append to an existing log
 
+.Parameter includeDebugInFile
+	set to include Debug messages in the log file, usually too noisy
+	
 .Outputs
 	none
+#>
+function Set-LoggingConfig($logName,$timestamp,$timestampFormat,$includeDebugInFile)
+{
+	$script:logName = $logName
+	$script:timestamp = $timestamp
+	$script:timestampFormat = $timestampFormat
+	$script:includeDebugInFile = $includeDebugInFile
+}
+
+<#
+.Synopsis
+	Start logging to a file, emitting a header to the file
+	
+.Parameter logFileName
+	the fully qualified path to a log file
+
+.Parameter timestampEachLine
+	set to prepend each line with a timestamp
+
+.Parameter dateFormat
+	format to use when timestamping.  Passes it to [DateTimeOffset]::ToString
+
+.Parameter append
+	set to append to an existing log
+
+.Parameter includeDebugInFile
+	set to include Debug messages in the log file, usually too noisy
+	
+.Outputs
+	none
+
+.Example
+	Start-Logging C:\temp\test.log -timestampEachLine -includeDebugInFile
+	
+	Start logging to a file, timestamping and including debug messages
 
 #>
 function Start-Logging
@@ -52,8 +102,9 @@ function Start-Logging
 param(
 [string] $logFileName,
 [switch] $timestampEachLine,
-[string] $dateFormat = "u",
-[switch] $append
+[string] $dateFormat = "yyyy-MM-dd HH:mm:ss,fff", # log4net's format
+[switch] $append,
+[switch] $includeDebugInFile
 )
 	if ( Get-IsLogging )
 	{
@@ -85,9 +136,18 @@ param(
 	$script:startTime = [DateTimeOffset]::Now
 	$script:timestamp = $timestampEachLine
 	$script:timestampFormat = $dateFormat
+	$script:includeDebugInFile = $includeDebugInFile
 	Write-LogMessage Verbose "Logging started to $script:logName"
 }
 
+<#
+.Synopsis
+	Stops logging by writing a trailer and clearing log settings
+	
+.Outputs
+	None
+
+#>
 function Stop-Logging
 {
 	if ( Get-IsLogging )
@@ -125,25 +185,29 @@ param(
 [AllowEmptyString()]
 [string] $message,
 [ValidateSet("Debug","Verbose","Info","Warning","Error")]
-[string] $level	= "Info"
+[string] $level	= "Info",
+[string] $prefix = ""
 )
 
 	if ( Get-IsLogging )
 	{
-		$prefix = ""
 		if ( $script:timestamp )
 		{
 			$now = [DateTimeOffset]::Now
 			# don't double up on timestamp
 			if ( $message.ToString() -like ("{0}*" -f $now.ToString("yyyy-MM-dd")) -or $message.ToString() -like ("{0}*" -f $now.ToString("MM/dd/yyyy")) )
 			{
+				$prefix = "" # can't put prefix on it since starts with timestamp
 			}
 			else
 			{
-				$prefix = "$($now.ToString($script:timestampFormat)) "
+				$prefix = "$($now.ToString($script:timestampFormat)) $prefix"
 			}
 		}
-		Add-Content -path $script:logName -Value "$prefix$message"
+		if ( $level -ne "Debug" -or $script:includeDebugInFile )
+		{
+			Add-Content -path $script:logName -Value "$prefix$message"
+		}
 	}
 }
 
@@ -250,7 +314,7 @@ process
 		{
 			$m = ($message | Out-String)
 		}
-		_logMessage "$prefix$m" $level
+		_logMessage $m $level $prefix 
 	}
 	catch 
 	{

@@ -147,7 +147,7 @@ function _setParameters( $parameters, $Cmd )
 			{
 				$key = "@$p"
 			}
-			Write-LogMessage Verbose "Adding parameter $key = $($parameters[$p])"
+			Write-LogMessage Debug "Adding parameter $key = $($parameters[$p])"
 			$null = $Cmd.Parameters.AddWithValue($p,$parameters[$p])
 		}
 	}
