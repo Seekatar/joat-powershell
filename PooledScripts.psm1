@@ -71,7 +71,7 @@ function _cleanup($me)
 {
         try
         {
-            $me.Posh.EndInvoke($me.Result);
+            $null = $me.Posh.EndInvoke($me.Result);
         }
         catch 
         {
@@ -145,7 +145,7 @@ param
 	the script to get details from
 
 .Outputs
-	string message about any error.  Empty if none
+	string message about any errors.  Empty if none
 
 #>
 function Get-PooledScriptError
@@ -166,10 +166,31 @@ process
 
 end
 {
-	$exceptionMsg = (@($pooledScripts | Select-Object -ExpandProperty LogList | Get-PooledLogMessage -level ErrorOnly -includeTime -includeName) -join "`n")
-	if ( $exceptionMsg )
+	$exceptionMsgs = $null
+	foreach ( $p in $pooledScripts )
+	{
+		 $exceptionMsg = @($p.LogList | Get-PooledLogMessage -level ErrorOnly -raw | ForEach-Object {
+			if ( $_.LogObject.Exception)
+			{
+				$msg = $_.LogObject.Exception.ToString()
+			}
+			if ( $_.LogObject.ScriptStackTrace )
+			{
+				$msg += [Environment]::NewLine+($_.LogObject.ScriptStackTrace)
+			}
+			Format-LoggerMessage -level Error -message $msg -timestamp $_.Timestamp -source $p.NameAndSuffix
+			}) -join [Environment]::NewLine
+
+		if ( $exceptionMsgs )
+		{
+			$exceptionMsgs += [Environment]::NewLine
+		}
+		$exceptionMsgs += $exceptionMsg
+	}
+
+	if ( $exceptionMsgs )
 	{	
-		return "Errors in PooledScripts`n$exceptionMsg"
+		return "Errors in PooledScripts$([Environment]::NewLine)$exceptionMsgs"
 	}
 	else
 	{
@@ -315,7 +336,7 @@ function New-PooledLogList()
 
 .Description
 	Resulting object has the following members:
-		TimeStamp
+		Timestamp
 		LogObject
 		Script
 		ToString($includeTime, $includeName,$includeType)
@@ -338,7 +359,7 @@ function New-PooledLogItem
 		[PSCustomObject] $pooledScript
 	)
 	
-	$logItem = [PSCustomObject] @{ 	TimeStamp = [DateTimeOffset]::Now;
+	$logItem = [PSCustomObject] @{ 	Timestamp = [DateTimeOffset]::Now;
 							 		LogObject = $logObject;
 							 		Script = $pooledScript; }
 	
@@ -398,7 +419,7 @@ function New-PooledLogItem
 		{
 			if ($includeType)
 			{
-				$prefix += "[Output] $name" 
+				$prefix += "[OUTPUT] $name" 
 			}
             return $prefix + ($this.LogObject | Out-String)
 		}
@@ -467,6 +488,7 @@ process
 								  TimedOut = $false;
 								  Ended = $false;
 								  LogList = $logList;
+								  LogFileName = $null;
 								  _debug  = New-Object System.Management.Automation.PSDataCollection[PSObject];
 								  _verbose = New-Object System.Management.Automation.PSDataCollection[PSObject];
 								  _warning  = New-Object System.Management.Automation.PSDataCollection[PSObject];
@@ -503,7 +525,8 @@ process
 
 	# Gets all the log messages in order, combining debug, verbose, warning, and error
 	# if want the string version, use Get-PooledLogMessage
-	Add-Member -InputObject $pooledScript -MemberType ScriptMethod -Name GetMessages -Value { 
+	Add-Member -InputObject $pooledScript -MemberType ScriptMethod -Name `
+	GetMessages -Value { 
 	param( 
 	[ValidateSet("All","Debug","Verbose","Warning","OutputOnly","DebugOnly","VerboseOnly","WarningOnly","ErrorOnly")]
 	[string]$level = "Warning" 
@@ -528,7 +551,8 @@ process
 	}
 	
 	# called when the thread is starting
-    Add-Member -InputObject $pooledScript -MemberType ScriptMethod -Name Starting -Value { 
+    Add-Member -InputObject $pooledScript -MemberType ScriptMethod -Name `
+	Starting -Value { 
 	param(
 	[Parameter(Mandatory)]
 	[Management.Automation.PowerShell] $posh,
@@ -547,7 +571,8 @@ process
 	}
 	
 	# called when script is stopping
-    Add-Member -InputObject $pooledScript -MemberType ScriptMethod -Name Stopped -Value {
+    Add-Member -InputObject $pooledScript -MemberType ScriptMethod -Name `
+	Stopped -Value {
 	[CmdletBinding()]
 	param([switch] $timedOut)
 	
@@ -571,7 +596,7 @@ process
             $this.HadErrors = $this.Posh.HadErrors;
             if ($timedOut)
             {
-				Write-Verbose "Starting BeginStop on $($this.NameAndSuffix), had errors is $($this.Posh.HadErrors)"
+				Write-LogMessage Verbose "Starting BeginStop on timed out script '$($this.NameAndSuffix)', had errors is $($this.Posh.HadErrors)"
                 $null = $this.Posh.BeginStop( {$null = $args[0].Posh.EndStop($args[0]); _cleanup $this}, $this )
             }
             else
@@ -580,7 +605,7 @@ process
             }
         }
 
-		Write-Verbose "Finished BeginStop on $($this.NameAndSuffix), Exception is $([bool]($this.Exception))"
+		Write-LogMessage Verbose "Finished BeginStop on '$($this.NameAndSuffix)', Exception is $([bool]($this.Exception))"
         # if have syntax error Dispose clears the error collection, copy it
 		if ($this.Exception )
 		{
@@ -589,7 +614,17 @@ process
 			# this closes collection, so have to add all in one shot
 			$this.LogList.Enqueue((New-PooledLogItem $exceptions[0] $this))
 		}
-		Write-Verbose "Finished stopped on $($this.NameAndSuffix)"
+		if ( $this.LogFileName )
+		{
+			Add-LogFile $this.LogFileName 
+			Remove-Item $this.LogFileName -ErrorAction Ignore
+			#$errorMessages = Get-PooledScriptError -pooledScript $this
+			#if ($errorMessages )
+			#{
+			#	Write-LogMessage Error $errorMessages
+			#}
+		}
+		Write-LogMessage Verbose "Finished stopped on '$($this.NameAndSuffix)'"
     }
 																							
 	return $pooledScript
@@ -597,6 +632,26 @@ process
 
 }
 
+function _createSessionState($importModules, $loggerFileNameSuffix )
+{
+	$logFileName = $null
+    $InitialSessionState = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
+    if($ImportModules)
+    {
+        $InitialSessionState.ImportPSModule($ImportModules) | Out-Null
+		if ( [bool]($ImportModules | Where-Object { $_ -eq (Join-Path $PSScriptRoot "logger.psm1") }))
+        {
+			$fileName, $timeStamp, $timeFormat, $includeDebugInFile = Get-LoggingConfig
+			$logFileName = "${fileName}_$loggerFileNameSuffix"
+    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_logName", $logFileName, "fileName for Logger") )
+    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_timestamp", $timeStamp, "timeStamp for Logger") )
+    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_timeFormat", $timeFormat ,"timeFormat for Logger") )
+    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_includeDebugInFile", $includeDebugInFile ,"includeDebugInFile for Logger") )
+    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_source", $loggerFileNameSuffix,"source name for Logger") )
+        }
+    }
+	return $InitialSessionState,$logFileName
+}
 
 <#
 .Synopsis
@@ -661,7 +716,8 @@ param(
 [string] $activityName = "Running pooled scripts",
 [switch] $PassThru,
 [switch] $ShowProgress,
-[string[]] $ImportModules
+[string[]] $ImportModules,
+[switch] $usePools
 )
 
 
@@ -672,24 +728,18 @@ begin
 		$MaximumThreads = $MinimumThreads
 	}
 	
-    $InitialSessionState = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
-    if($ImportModules)
-    {
-        $InitialSessionState.ImportPSModule($ImportModules) | Out-Null
-		if ( [bool]($ImportModules | Where-Object { $_ -eq (Join-Path $PSScriptRoot "logger.psm1") }))
-        {
-			$fileName, $timeStamp, $timeFormat, $includeDebugInFile = Get-LoggingConfig
-			#Write-Warning "Exporting $fileName"
-    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_logName", $fileName, "fileName for Logger") )
-    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_timestamp", $timeStamp, "timeStamp for Logger") )
-    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_timeFormat", $timeFormat ,"timeFormat for Logger") )
-    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_includeDebugInFile", $includeDebugInFile ,"includeDebugInFile for Logger") )
-        }
-    }
+	if ( $usePools )
+	{
+	    $InitialSessionState = _createSessionState $importModules ""
 
-    $pool = [RunspaceFactory]::CreateRunspacePool($MinimumThreads, $MaximumThreads, $InitialSessionState, $Host)
-    $pool.ApartmentState = "STA"
-    $pool.open()
+		$pool =  [RunspaceFactory]::CreateRunspacePool($MinimumThreads, $MaximumThreads, $InitialSessionState, $Host)
+		$pool.ApartmentState = "STA"
+		$pool.open()
+	}
+	else
+	{
+		$pool = $null 
+	}
 
     $pooledScripts = @()
 	
@@ -775,16 +825,27 @@ end
         foreach( $p in $pooledScripts)
         {
             $posh = [PowerShell]::Create().AddScript($p.ScriptBlock) 
+			$p.Starting($posh,$index++)
+			$p.PassThru = $PassThru
+			
             if ( $p.ArgumentList )
 			{
 				$posh.AddParameters($p.ArgumentList ) | Out-Null
 			}
-            $posh.RunspacePool = $pool
-			
-			$p.Starting($posh,$index++)
-			$p.PassThru = $PassThru
-			
-			Write-LogMessage Verbose "Starting pooled script: '$($p.NameAndSuffix)' with PassThru of $PassThru"
+			if ( $usePools )
+			{
+				$posh.RunspacePool = $pool
+			}
+			else
+			{
+				$InitialSessionState, $logFileName = _createSessionState $importModules $p.NameAndSuffix
+				$p.LogFileName = $logFileName
+				$runspace = [RunspaceFactory]::CreateRunspace($Host,$InitialSessionState)
+				$runspace.Open()
+				$posh.Runspace = $runspace 
+			}
+
+			Write-LogMessage Verbose "Starting pooled script: '$($p.NameAndSuffix)' with logFileName of '$logFileName' and PassThru of $PassThru"
 			
 			$p.Result = $posh.BeginInvoke( $inputStream, $p._output )
         }
@@ -840,7 +901,7 @@ end
 					{
 						$p.Stopped($false)
 						
-						if ( -not $PassThru )
+						if ( -not $PassThru -and $p._output -and $p._output.Count )
 						{
 							Write-LogMessage Verbose "Sending objects not passed thru"
 							$p._output
@@ -875,7 +936,7 @@ end
 	}
 	catch 
 	{
-		Write-LogMessage Error "Exception! $_`n$($_.ScriptStackTrace)"
+		Write-LogMessage Error "Exception in Invoke-PooledScript! $_`n$($_.ScriptStackTrace)"
 	}
 	finally
 	{
@@ -887,6 +948,8 @@ end
 				$global:error.RemoveAt(0) # remove this error to avoid false positive
 			}
 		}
+		# append any log files not yet appended
+		$pooledScripts | Where-Object { $_ -and $_.LogFileName -and (Test-Path $_.LogFileName) } | ForEach-Object { $_.LogFileName } | Add-LogFile
 
 	}
 	if ( $TerminateAllThreads )

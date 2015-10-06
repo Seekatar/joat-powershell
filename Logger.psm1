@@ -1,37 +1,15 @@
 Set-StrictMode -Version Latest
 
 $script:startTime = $null
-$script:backGroundId = $null
 
-if ( (Get-Variable _logger_logName -Scope Global -ErrorAction Ignore) -and (Test-Path $global:_logger_logName) )
+# helper to clear all script variables
+function _init
 {
-    $script:timestamp = $global:_logger_timestamp
-    $script:timestampFormat = $global:_logger_timeFormat
-	$script:includeDebugInFile = $global:_logger_includeDebugInFile 
-	$script:backGroundId = [Guid]::NewGuid().ToString()
-    $script:logName = "$global:_logger_logName$script:backgroundId"
-
-    #Write-Warning "Logger using global settings of '$script:logName' '$script:timestamp' '$script:timestampFormat'"
-}
-else
-{
-    $script:logName = $null
+	$script:logName = $null
     $script:timestamp = $false
     $script:timestampFormat = $null
 	$script:includeDebugInFile = $false
-}
-
-<#
-.Synopsis
-	Get the settings currently used by the logger
-	
-.Outputs
-	logname, timestamp (bool), timestampFormat, includeDebugInFile
-
-#>
-function Get-LoggingConfig
-{
-	$script:logName,$script:timestamp,$script:timestampFormat,$script:includeDebugInFile
+	$script:source = $null
 }
 
 <#
@@ -58,15 +36,44 @@ function Get-LoggingConfig
 .Parameter includeDebugInFile
 	set to include Debug messages in the log file, usually too noisy
 	
+.Parameter defaultSource
+	default source for logging each line
+	
 .Outputs
 	none
 #>
-function Set-LoggingConfig($logName,$timestamp,$timestampFormat,$includeDebugInFile)
+function Set-LoggingConfig($logName,$timestamp,$timestampFormat,$includeDebugInFile,$defaultSource="")
 {
 	$script:logName = $logName
 	$script:timestamp = $timestamp
 	$script:timestampFormat = $timestampFormat
 	$script:includeDebugInFile = $includeDebugInFile
+	$script:source = $defaultSource
+}
+
+# if globals set, use them.  PoolsScript sets these so background thread can log 
+# with parent's log settings and know the name of the log file
+if ( (Get-Variable _logger_logName -Scope Global -ErrorAction Ignore) )
+{
+	Set-LoggingConfig  -logName $global:_logger_logName -timestamp $global:_logger_timestamp -timestampFormat $global:_logger_timeFormat `
+					   -includeDebugInFile $global:_logger_includeDebugInFile -defaultSource $global:_logger_source
+}
+else
+{
+	_init
+}
+
+<#
+.Synopsis
+	Get the settings currently used by the logger
+	
+.Outputs
+	logname, timestamp (bool), timestampFormat, includeDebugInFile
+
+#>
+function Get-LoggingConfig
+{
+	$script:logName,$script:timestamp,$script:timestampFormat,$script:includeDebugInFile,$script:source
 }
 
 <#
@@ -104,11 +111,19 @@ param(
 [switch] $timestampEachLine,
 [string] $dateFormat = "yyyy-MM-dd HH:mm:ss,fff", # log4net's format
 [switch] $append,
-[switch] $includeDebugInFile
+[switch] $includeDebugInFile,
+[string] $defaultSource = ""
 )
 	if ( Get-IsLogging )
 	{
-		Write-LogMessage Error "Already logging to $script:logName"
+		if ( $logFileName -ne $script:logName )
+		{
+			Write-LogMessage Error "Can't log to $logFileName since already logging to $script:logName"
+		}
+		else 
+		{
+			Write-LogMessage Warning "Start-Logging on same file: $logFileName.  Not usually recommended."
+		}
 		return
 	}
 	
@@ -124,20 +139,26 @@ param(
 * Host: $((get-host).Name)
 *********************************
 "@	
-	if ( $append )
+	try
 	{
-		Add-Content -Path $logFileName -Value $start
+		if ( $append )
+		{
+			Add-Content -Path $logFileName -Value $start
+		}
+		else
+		{
+			Set-Content -Path $logFileName -Value $start
+		}
+		Set-LoggingConfig -logName $logFileName -timestamp $timestampEachLine -timestampFormat $dateFormat `
+							-includeDebugInFile $includeDebugInFile -defaultSource $defaultSource
+		$script:startTime = [DateTimeOffset]::Now
+		Write-LogMessage Verbose "Logging started to $script:logName"
 	}
-	else
+	catch 
 	{
-		Set-Content -Path $logFileName -Value $start
+		Write-Error "Error initializing log file $logFileName`n$_"
+		$script:logName = $null
 	}
-	$script:logName = $logFileName
-	$script:startTime = [DateTimeOffset]::Now
-	$script:timestamp = $timestampEachLine
-	$script:timestampFormat = $dateFormat
-	$script:includeDebugInFile = $includeDebugInFile
-	Write-LogMessage Verbose "Logging started to $script:logName"
 }
 
 <#
@@ -178,6 +199,10 @@ function Get-IsLogging
 	$script:logName -ne $null
 }
 
+<#
+.Synopsis
+	log a message to the file
+#>
 function _logMessage
 {
 param(
@@ -186,11 +211,21 @@ param(
 [string] $message,
 [ValidateSet("Debug","Verbose","Info","Warning","Error")]
 [string] $level	= "Info",
-[string] $prefix = ""
+[string] $source
 )
 
 	if ( Get-IsLogging )
 	{
+		$prefix = "[$($level.ToUpper())] "
+		if ( -not $source )
+		{
+			$source = $script:source
+		}
+		if ( $source )
+		{
+			$prefix += "[$source] "
+		}
+	
 		if ( $script:timestamp )
 		{
 			$now = [DateTimeOffset]::Now
@@ -209,6 +244,42 @@ param(
 			Add-Content -path $script:logName -Value "$prefix$message"
 		}
 	}
+}
+
+function Format-LoggerMessage
+{
+[CmdletBinding()]
+param(
+[ValidateSet("Debug","Verbose","Info","Warning","Error")]
+[string] $level	= "Info",
+[Parameter(Mandatory,ValueFromPipeline)]	
+[AllowEmptyString()]
+[AllowNull()]
+[string] $message,
+[DateTimeOffset] $timestamp = [DateTimeOffset]::Now,
+[string] $source
+)
+	$prefix = "[$($level.ToUpper())] "
+
+	if ( $script:timestamp )
+	{
+		$now = $timestamp
+		# don't double up on timestamp
+		if ( $message.ToString() -like ("{0}*" -f $now.ToString("yyyy-MM-dd")) -or $message.ToString() -like ("{0}*" -f $now.ToString("MM/dd/yyyy")) )
+		{
+			$prefix = "" # can't put prefix on it since starts with timestamp
+		}
+		else
+		{
+			$prefix = "$($now.ToString($script:timestampFormat)) $prefix"
+		}
+	}
+	if ( $source ) 
+	{
+		$prefix += "[$source] "
+	}
+
+	"$prefix $message"
 }
 
 <#
@@ -230,6 +301,7 @@ param(
 #>
 function Add-LogFile
 {
+[CmdletBinding()]
 param(
 [Parameter(ValueFromPipeLine)]
 $path,
@@ -244,12 +316,16 @@ process
 		{
 			if ( $delimit )
 			{
-				_logMessage ">>>>>> Begin insert of file $path"
+				_logMessage (">"*80)
+				_logMessage ">> Begin insert of file $path"
+				_logMessage (">"*80)
 			}
 			Get-Content $path | Add-Content -Path $script:logName 
 			if ( $delimit )
 			{
-				_logMessage "<<<<<< End insert of file $path"
+				_logMessage (">"*80)
+				_logMessage "<< End insert of file $path"
+				_logMessage (">"*80)
 			}
 		}
 		else
@@ -305,8 +381,6 @@ process
 		$message = "" # allow blank lines
 	}
 	
-	$prefix = "[$($level.ToUpper())] "
-	
 	try
 	{
 		$m = $message
@@ -314,7 +388,7 @@ process
 		{
 			$m = ($message | Out-String)
 		}
-		_logMessage $m $level $prefix 
+		_logMessage $m $level 
 	}
 	catch 
 	{
