@@ -38,6 +38,23 @@ $_outputDataAdded = {
 
 <#
 .Synopsis
+	internal function for validating level
+#>
+function _level($y) 
+{
+    $set = "All","Debug","Verbose","Warning","OutputOnly","DebugOnly","VerboseOnly","WarningOnly","ErrorOnly"
+    if ( $y -in $set ) 
+	{
+		$true
+	} 
+	else 
+	{
+		throw "The argument `"$y`" does not belong to the set `"$($set -join ",")`""
+	}
+}
+
+<#
+.Synopsis
 	internal function for setting PowerShell streams on a PooledScript
 #>
 function _setStreams
@@ -100,6 +117,16 @@ function _cleanup($me)
 	Summary report object
 
 #>
+function getCount( $list )
+{
+	$count = 0
+	if( $list ) 
+	{
+		$count = @($list).Count
+	}
+	$count
+}
+
 function Get-PooledScriptSummary
 {
 [CmdletBinding()]
@@ -116,11 +143,11 @@ param
 	process
 	{
 		$properties = 'NameAndSuffix',
-						@{n='HadException';e={$_.Exception -ne $null}},
+						@{n='HadException';e={$null -ne $_.Exception }},
 						'HadErrors',
-						@{n='Output';e={@($_.Output).Count}},
-						@{n='Warnings';e={@($_.Warning).Count}},
-						@{n='Error';e={@($_.Error).Count}},
+						@{n='Output';e={getCount $_.Output }},
+						@{n='Warnings';e={getCount $_.Warning}},
+						@{n='Error';e={getCount $_.Error}},
 						'Ended'
 						 
 
@@ -199,6 +226,49 @@ end
 }
 }
 
+<#
+.Synopsis
+	Write messages logged to the background script to the appropriate stream
+	
+.Description
+	Uses Write-LogMessage to write to appropriate stream
+
+.Parameter logList
+	pooledScript or logList of messages
+
+.Parameter level
+	the log level to output to log, defaults to Warning
+
+#>
+function Write-PooledScriptMessage
+{
+[CmdletBinding(DefaultParameterSetName="string")]
+param( 
+[Parameter(ValueFromPipeline)]
+[Object] $logList, 
+[ValidateScript({_level $_})]
+[string]$level = "Warning"
+)
+	
+process
+{
+	Get-PooledLogMessage -logList $logList -level $level -raw | ForEach-Object {
+		$logItem = $_
+		
+		$prev = $VerbosePreference
+		$VerbosePreference = $PSCmdlet.GetVariableValue('VerbosePreference')
+		
+		if ( $logItem.LogObject -is [System.Management.Automation.DebugRecord]) { Write-LogMessage Debug -message $logItem.LogObject -timestamp $logItem.Timestamp }
+		elseif ( $logItem.LogObject -is [System.Management.Automation.VerboseRecord]) { Write-LogMessage Verbose -message $logItem.LogObject -timestamp $logItem.Timestamp }
+		elseif ( $logItem.LogObject -is [System.Management.Automation.WarningRecord]) { Write-LogMessage Warning -message $logItem.LogObject -timestamp $logItem.Timestamp }
+		elseif ( $logItem.LogObject -is [System.Management.Automation.ErrorRecord]) { Write-LogMessage Error -message $logItem.LogObject -timestamp $logItem.Timestamp }
+		else { Write-LogMessage Info -message $logItem -timestamp $logItem.Timestamp }
+		
+		$VerbosePreference = $prev
+	}
+}
+
+}
 
 <#
 .Synopsis
@@ -268,11 +338,12 @@ end
 #>
 function Get-PooledLogMessage 
 { 
+[OutputType([array])]
 [CmdletBinding(DefaultParameterSetName="string")]
 param( 
 [Parameter(ValueFromPipeline)]
 [Object] $logList, 
-[ValidateSet("All","Debug","Verbose","Warning","OutputOnly","DebugOnly","VerboseOnly","WarningOnly","ErrorOnly")]
+[ValidateScript({_level $_})]
 [string]$level = "Warning",
 [Parameter(ParameterSetName="string")]
 [switch] $includeTime, 
@@ -287,7 +358,7 @@ process
 {
 	if ( $includeTime -and -not $timeFormat )
 	{
-		$logName,$timestamp,$timeFormat = Get-LoggingConfig
+		$timeFormat = (Get-LoggingConfig).timestampFormat
 	}
 
     if ( -not $loglist )
@@ -363,7 +434,8 @@ function New-PooledLogItem
 							 		LogObject = $logObject;
 							 		Script = $pooledScript; }
 	
-	Add-Member -InputObject $logItem -MemberType ScriptMethod -Name ToString -Value { 
+	Add-Member -InputObject $logItem -MemberType ScriptMethod -Name `
+	ToString -Value { 
 		param( 
 			[bool] $includeTime = $false, 
 			[bool] $includeName = $false, 
@@ -467,7 +539,7 @@ param(
 
 process
 {
-	if ( $logList -eq $null )
+	if ( $null -eq $logList )
 	{
 		$logList = New-Object System.Collections.Concurrent.ConcurrentQueue[PSObject];
 	}
@@ -528,7 +600,7 @@ process
 	Add-Member -InputObject $pooledScript -MemberType ScriptMethod -Name `
 	GetMessages -Value { 
 	param( 
-	[ValidateSet("All","Debug","Verbose","Warning","OutputOnly","DebugOnly","VerboseOnly","WarningOnly","ErrorOnly")]
+	[ValidateScript({_level $_})]
 	[string]$level = "Warning" 
 	)
 		$list = @(Get-PooledLogMessage -logList $this.LogList -level $level -raw:$true)
@@ -618,11 +690,6 @@ process
 		{
 			Add-LogFile $this.LogFileName 
 			Remove-Item $this.LogFileName -ErrorAction Ignore
-			#$errorMessages = Get-PooledScriptError -pooledScript $this
-			#if ($errorMessages )
-			#{
-			#	Write-LogMessage Error $errorMessages
-			#}
 		}
 		Write-LogMessage Verbose "Finished stopped on '$($this.NameAndSuffix)'"
     }
@@ -638,16 +705,18 @@ function _createSessionState($importModules, $loggerFileNameSuffix )
     $InitialSessionState = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
     if($ImportModules)
     {
-        $InitialSessionState.ImportPSModule($ImportModules) | Out-Null
+		# paths must be fully qualified to work
+		$paths = $ImportModules | ForEach-Object { Resolve-Path( $_ ) }
+
+        $InitialSessionState.ImportPSModule($paths) | Out-Null
+		Write-Verbose "Imported $paths"
+
 		if ( [bool]($ImportModules | Where-Object { $_ -eq (Join-Path $PSScriptRoot "logger.psm1") }))
         {
-			$fileName, $timeStamp, $timeFormat, $includeDebugInFile = Get-LoggingConfig
-			$logFileName = "${fileName}_$loggerFileNameSuffix"
-    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_logName", $logFileName, "fileName for Logger") )
-    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_timestamp", $timeStamp, "timeStamp for Logger") )
-    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_timeFormat", $timeFormat ,"timeFormat for Logger") )
-    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_includeDebugInFile", $includeDebugInFile ,"includeDebugInFile for Logger") )
-    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_source", $loggerFileNameSuffix,"source name for Logger") )
+			$loggerConfig = Get-LoggingConfig
+			$loggerConfig.logName += "_$loggerFileNameSuffix"
+			$logFileName = $loggerConfig.logName 
+    	    $InitialSessionState.Variables.Add( (New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList "_logger_config", $loggerConfig, "config for logger") )
         }
     }
 	return $InitialSessionState,$logFileName
@@ -693,7 +762,7 @@ function _createSessionState($importModules, $loggerFileNameSuffix )
 	
 	$tests = @()
 
-	$tests += $webSites | Where-Object {$_.type -eq 'Excalibur'-or $_.type -eq 'WebService'} | ForEach-Object { New-PooledScript -Name "CacheErrors: $($_.Url)" -ScriptBlock {param($url) $url | Test-CacheErrors} -ArgumentList @{url=$_.Url} -LogList $logList }
+	$tests += $webSites | Where-Object {$_.type -eq 'Excalibur'-or $_.type -eq 'WebService'} | ForEach-Object { New-PooledScript -Name "CacheErrors: $($_.Url)" -ScriptBlock {param($url) $url | Test-CacheError} -ArgumentList @{url=$_.Url} -LogList $logList }
 	
 	$tests | Invoke-PooledScript -ShowProgress -ImportModules (Join-Path $PSScriptRoot DeployHelpers.psm1) -PassThru 
 
@@ -730,7 +799,7 @@ begin
 	
 	if ( $usePools )
 	{
-	    $InitialSessionState = _createSessionState $importModules ""
+	    $InitialSessionState, $logFileName = _createSessionState $importModules ""
 
 		$pool =  [RunspaceFactory]::CreateRunspacePool($MinimumThreads, $MaximumThreads, $InitialSessionState, $Host)
 		$pool.ApartmentState = "STA"
@@ -744,6 +813,17 @@ begin
     $pooledScripts = @()
 	
 	$progressId = 9876  # random
+
+	if ( $ImportModules )
+	{
+		foreach ( $p in $ImportModules )
+		{
+			if ( -not (Test-Path $p -PathType Leaf))
+			{
+				Write-LogMessage Error "Import module passed to Invoke-Pooled script not found: $p"
+			}
+		}
+	}
 }
 
 process
@@ -784,10 +864,10 @@ end
 					# Query the status and show it if press Q
 					if ( $key.key -eq "Q" )
 					{
-	                    Write-Host ("Running or pending scripts ({0:f2} secs since started):" -f ((Get-Date) - $startTime).TotalSeconds) # write-host ok
+	                    Write-LogMessage Info ("Running or pending scripts ({0:f2} secs since started):" -f ((Get-Date) - $startTime).TotalSeconds) 
 	                    foreach ( $t in $pooledScripts | Where-Object { -not $_.Ended })
 	                    {
-	                        Write-Host "    $($t.NameAndSuffix)" # write-host ok
+	                        Write-LogMessage Info "    $($t.NameAndSuffix)" # Write-LogMessage Info ok
 	                    }
 					}
 				}

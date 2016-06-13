@@ -2,7 +2,10 @@ Set-StrictMode -Version Latest
 
 $script:startTime = $null
 
-# helper to clear all script variables
+<#
+.Synopsis
+	helper to clear all script variables
+#>
 function _init
 {
 	$script:logName = $null
@@ -51,12 +54,16 @@ function Set-LoggingConfig($logName,$timestamp,$timestampFormat,$includeDebugInF
 	$script:source = $defaultSource
 }
 
+############## CODE RUN AT MODULE LOAD
+############## CODE RUN AT MODULE LOAD
+############## CODE RUN AT MODULE LOAD
+############## CODE RUN AT MODULE LOAD
 # if globals set, use them.  PoolsScript sets these so background thread can log 
 # with parent's log settings and know the name of the log file
-if ( (Get-Variable _logger_logName -Scope Global -ErrorAction Ignore) )
+if ( (Get-Variable _logger_config -Scope Global -ErrorAction Ignore) )
 {
-	Set-LoggingConfig  -logName $global:_logger_logName -timestamp $global:_logger_timestamp -timestampFormat $global:_logger_timeFormat `
-					   -includeDebugInFile $global:_logger_includeDebugInFile -defaultSource $global:_logger_source
+	Set-LoggingConfig  -logName $global:_logger_config.logName -timestamp $global:_logger_config.timestamp -timestampFormat $global:_logger_config.timestampFormat `
+					   -includeDebugInFile $global:_logger_config.includeDebugInFile -defaultSource $global:_logger_config.source
 }
 else
 {
@@ -65,15 +72,43 @@ else
 
 <#
 .Synopsis
+	internal function for validating level
+#>
+function _level($y) 
+{
+    $set = "Debug","Verbose","Info","Warning","Error"
+    if ( $y -in $set ) 
+	{
+		$true
+	} 
+	else 
+	{
+		throw "The argument `"$y`" does not belong to the set `"$($set -join ",")`""
+	}
+}
+
+
+<#
+.Synopsis
+	set the source for logging
+#>
+function Set-LoggerSource( [string] $source )
+{
+	$script:source = $source
+}
+
+
+<#
+.Synopsis
 	Get the settings currently used by the logger
 	
 .Outputs
-	logname, timestamp (bool), timestampFormat, includeDebugInFile
+	hash table with logging settings
 
 #>
 function Get-LoggingConfig
 {
-	$script:logName,$script:timestamp,$script:timestampFormat,$script:includeDebugInFile,$script:source
+	@{logName=$script:logName;timestamp=$script:timestamp;timestampFormat=$script:timestampFormat;includeDebugInFile=$script:includeDebugInFile;source=$script:source}
 }
 
 <#
@@ -118,7 +153,7 @@ param(
 	{
 		if ( $logFileName -ne $script:logName )
 		{
-			Write-LogMessage Error "Can't log to $logFileName since already logging to $script:logName"
+			Write-LogMessage Error "Can't log to $logFileName since already logging to $script:logName.  Use Stop-Logging to stop previous one."
 		}
 		else 
 		{
@@ -181,7 +216,7 @@ function Stop-Logging
 * Elapsed: $("{0:0.00}" -f ($end - $script:startTime).TotalMinutes) minutes
 *********************************
 "@	
-		Write-Host "Logging stopped. Output is in $script:logName"
+		Write-LogMessage Info "Logging stopped. Output is in $script:logName"
 		$script:logName = $null
 	}
 }
@@ -196,7 +231,7 @@ function Stop-Logging
 #>
 function Get-IsLogging
 {
-	$script:logName -ne $null
+	$null -ne $script:logName
 }
 
 <#
@@ -209,9 +244,10 @@ param(
 [Parameter(Mandatory)]	
 [AllowEmptyString()]
 [string] $message,
-[ValidateSet("Debug","Verbose","Info","Warning","Error")]
+[ValidateScript({_level $_})]
 [string] $level	= "Info",
-[string] $source
+[string] $source,
+[DateTimeOffset] $timestamp
 )
 
 	if ( Get-IsLogging )
@@ -228,15 +264,14 @@ param(
 	
 		if ( $script:timestamp )
 		{
-			$now = [DateTimeOffset]::Now
 			# don't double up on timestamp
-			if ( $message.ToString() -like ("{0}*" -f $now.ToString("yyyy-MM-dd")) -or $message.ToString() -like ("{0}*" -f $now.ToString("MM/dd/yyyy")) )
+			if ( $message.ToString() -like ("{0}*" -f $timestamp.ToString("yyyy-MM-dd")) -or $message.ToString() -like ("{0}*" -f $timestamp.ToString("MM/dd/yyyy")) )
 			{
 				$prefix = "" # can't put prefix on it since starts with timestamp
 			}
 			else
 			{
-				$prefix = "$($now.ToString($script:timestampFormat)) $prefix"
+				$prefix = "$($timestamp.ToString($script:timestampFormat)) $prefix"
 			}
 		}
 		if ( $level -ne "Debug" -or $script:includeDebugInFile )
@@ -248,9 +283,10 @@ param(
 
 function Format-LoggerMessage
 {
+[OutputType([string])]
 [CmdletBinding()]
 param(
-[ValidateSet("Debug","Verbose","Info","Warning","Error")]
+[ValidateScript({_level $_})]
 [string] $level	= "Info",
 [Parameter(Mandatory,ValueFromPipeline)]	
 [AllowEmptyString()]
@@ -330,12 +366,12 @@ process
 		}
 		else
 		{
-			Write-LogMessage Warning "Can't append file '$path' since it does not exist"
+			Write-LogMessage Warning "Logger.psm1 can't append log file '$path' since it does not exist"
 		}
 	}
 	else
 	{
-		Write-LogMessage Warning "Not logging.  Ignoring adding file $path"
+		Write-LogMessage Warning "Logger.psm1 is not logging.  Ignoring adding file $path"
 	}
 }
 }
@@ -351,10 +387,13 @@ process
 	the level of the message, defaults to Info
 
 .Parameter BackgroundColor
-	for Info messages, can specify color
+	for Info messages, can specify color when going to console
 
 .Parameter ForegroundColor
-	for Info messages, can specify color
+	for Info messages, can specify color when going to console
+
+.Parameter timestamp
+	timestamp for the message, defaults to [DateTimeOffset]::Now
 
 .Outputs
 	None
@@ -364,14 +403,15 @@ function Write-LogMessage
 {
 [CmdletBinding()]
 param(
-[ValidateSet("Debug","Verbose","Info","Warning","Error")]
+[ValidateScript({_level $_})]
 [string] $level	= "Info",
 [Parameter(Mandatory,ValueFromPipeline)]	
 [AllowEmptyString()]
 [AllowNull()]
 [object] $message,
 [ConsoleColor] $BackgroundColor,  
-[ConsoleColor] $ForegroundColor
+[ConsoleColor] $ForegroundColor,
+[DateTimeOffset] $timestamp = [DateTimeOffset]::Now
 )
 
 process
@@ -388,31 +428,32 @@ process
 		{
 			$m = ($message | Out-String)
 		}
-		_logMessage $m $level 
+		_logMessage -message $m -level $level -timestamp $timestamp
 	}
 	catch 
 	{
 		Write-Error "Error trying to log to '$script:logName' message '$message'`n$_`n$($_.ScriptStackTrace)" # Write-Error ok
 	}
 	
+	# Write-Host takes object, all others take string
 	switch ($level)
 	{ 
 		"Debug"		{ 
 						# get the Debug setting from the parent, session
 						$prev = $DebugPreference
 						$DebugPreference = $PSCmdlet.GetVariableValue('DebugPreference')
-						Write-Debug $message
+						Write-Debug $m
 						$DebugPreference = $prev
 					}
 		"Verbose"  	{ 	
 						# get the verbose setting from the parent, session
 						$prev = $VerbosePreference
 						$VerbosePreference = $PSCmdlet.GetVariableValue('VerbosePreference')
-						Write-Verbose $message
+						Write-Verbose $m
 						$VerbosePreference = $prev
 					}
-		"Warning" 	{ Write-Warning $message; }
-		"Error" 	{ Write-Error $message; }
+		"Warning" 	{ Write-Warning $m }
+		"Error" 	{ Write-Error $m }
 		"Info" 		{  # could do (Get-host).UI.RawUI.ForegroundColor, but that depends on running in certain hosts
 			if ( $ForegroundColor -and $BackgroundColor )
 			{
