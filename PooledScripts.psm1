@@ -847,7 +847,7 @@ end
 		try 
 		{
 	        #Check for Control + C
-	        if ([Console]::KeyAvailable)
+	        if ([Console]::In.Peek() -gt 0 )
 	        {
 	            $key = [Console]::ReadKey($true)
 	            if (($key.modifiers -band [consolemodifiers]"control") -and ($key.key -eq "C"))

@@ -3,7 +3,7 @@
 # else > 400 raise
 
 $baseUri = "https://io.adafruit.com/api"
-$aioKey = '3a520c87c4ac836552c6c2703abebdfbb32327ad'
+$aioKey = 'zzzzzzzzzzzzzzzzzzzzzzzz'
 $feedName = "Welcome Feed"
 $groupKey = "my-feeds"
 
