@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+[switch] $pressEnterToExit
+)
 
 $ports = [system.io.ports.serialport]::getportnames()
 if ( -not $ports )
@@ -12,7 +14,7 @@ else
 }
 
 $ports = Get-WmiObject win32_serialport | select DeviceID, Name, Description
-if ( -not $port )
+if ( -not $ports )
 {
     Write-Verbose "No com ports found WMI"
 }
@@ -37,3 +39,8 @@ else
 
 # this gets FTDI, too, seems most reliable
 Get-WmiObject win32_pnpentity |  ?  { $_.caption -match "com\d" } | select Name, Description, @{n='Source';e={"PnPEntity"}}, DeviceID
+
+if ( $pressEnterToExit )
+{
+    Read-Host -Prompt "`nPress enter"
+}
