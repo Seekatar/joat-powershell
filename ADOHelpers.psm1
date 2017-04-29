@@ -1,13 +1,41 @@
 ﻿Set-StrictMode -Version Latest
 
+Import-Module (Join-Path $PSScriptRoot Logger.psm1)
+
 if ( -not (Get-Variable dbTrace -Scope global -ErrorAction Ignore) )
 {
 	$global:dbTrace = $false
 }
 
-$script:ADOPrintHandlerDefault = {param($msg) Write-Output $msg }
-$script:ADOPrintHandler = $script:ADOPrintHandlerDefault 
-function Set-ADOPrintHandler( $sb ) { $script:ADOPrintHandler = $sb }
+$script:ADOPrintHandlerDefault = {
+    param($msg) 
+    Write-Host $msg
+    }
+
+# needs to be global since event can't get it from $Script:
+$global:ADOPrintHandler = $script:ADOPrintHandlerDefault 
+
+<#
+.Synopsis
+	Set the handler for handling PRINT statments in SQL
+
+.Parameter sb
+	The script block that takes a $msg parameter
+
+.Outputs
+	The current script block, so you can restore it
+#>
+function Set-ADOPrintHandler
+{
+[Parameter(Mandatory)]
+param(
+[scriptblock] $sb 
+) 
+ 
+	$prev = $global:ADOPrintHandler; 
+	$global:ADOPrintHandler = $sb; 
+	$prev 
+}
 
 function _writeTraceMessage( $msg )
 {
@@ -24,7 +52,15 @@ function _registerForEvent( $Conn )
 {
 	Unregister-Event -SourceIdentifier ADOHelper.GetDbRows -Force -ErrorAction Ignore
 	# there's also $event.SourceEventArgs.Errors which is a System.Data.SqlClient.SqlErrorCollection of System.Data.SqlClient.SqlError
-	$null = Register-ObjectEvent -InputObject $Conn -EventName InfoMessage -SourceIdentifier ADOHelper.GetDbRows -Action { & $ADOPrintHandler $event.SourceEventArgs.Message }
+	if ( $global:ADOPrintHandler )
+	{
+		$null = Register-ObjectEvent -InputObject $Conn -EventName InfoMessage -SourceIdentifier "ADOHelper.GetDbRows" -Action {
+			 Invoke-Command -scriptBlock $global:ADOPrintHandler -arg $event.SourceEventArgs.Message }
+	}
+	else 
+	{
+		_writeTraceMessage "No registration since null handler"
+	}
 }
 
 <#
@@ -87,6 +123,9 @@ helper to close the connection, database
 function _closeAll( $Cmd, $Conn )
 {
 	$hadError = [bool]$Error
+
+	_unregisterEvent
+
 	
 	if ( $global:dbTrace )
 	{
@@ -94,7 +133,7 @@ function _closeAll( $Cmd, $Conn )
 		$spid = $Cmd.ExecuteScalar()
 		_writeTraceMessage "Closing cmd with spid of $spid" 
 	}
-	if ( $Cmd -ne $null )
+	if ( $Cmd )
 	{
 		try { $cmd.Dispose() } 
 		catch 
@@ -102,7 +141,7 @@ function _closeAll( $Cmd, $Conn )
 			Write-LogMessage Warning "Error closing cmd $_"
 		}
 	}
-	if ( $Conn -ne $null )
+	if ( $Conn  )
 	{
 		try
 		{
@@ -110,7 +149,10 @@ function _closeAll( $Cmd, $Conn )
 			{
 				$Conn.ChangeDatabase('master') # sometimes conn kept alive, this at least switched off another db
 			}
-			catch {}
+			catch 
+			{
+				Write-LogMessage Error "Error trying to re-use connection:`n$_"
+			}
 			
 			if ( $global:dbTrace )
 			{
@@ -133,11 +175,12 @@ function _closeAll( $Cmd, $Conn )
 	{
 		$Error.Clear() # don't let this stop deploy
 	}
-	
+
 }
 
 function _setParameters( $parameters, $Cmd )
 {
+	$Cmd.Parameters.Clear()
 	if ( $parameters )
 	{
 		foreach ( $p in $parameters.Keys )
@@ -147,107 +190,191 @@ function _setParameters( $parameters, $Cmd )
 			{
 				$key = "@$p"
 			}
-			Write-LogMessage Debug "Adding parameter $key = $($parameters[$p])"
+			_writeTraceMessage "Adding parameter $key = $($parameters[$p])"
 			$null = $Cmd.Parameters.AddWithValue($p,$parameters[$p])
 		}
 	}
 }
 
-<#
-.Synopsis
-	Execute a non-query on the database
+function _formatExceptionMessage( $serverName, $sql, $theError )
+{
+	$msg = "Error executing SQL on $serverName"
 
-.Parameter server
-	SQL Server
+	if ( $theError.Exception -and $theError.Exception.InnerException -and $theError.Exception.InnerException -is [System.Data.SqlClient.SqlException])
+	{
+		$e = $theError.Exception.InnerException
+		if ( $e.Procedure )
+		{
+			$msg += ("`nMsg {0}, Level {1}, State {2}, Procedure {3}, Line {4}`n" -f $e.Number, $e.Class, $e.State, $e.Procedure, $e.LineNumber)
+		}
+		else 
+		{
+			$msg += ("`nMsg {0}, Level {1}, State {2}, Line {3}`n" -f $e.Number, $e.Class, $e.State, $e.LineNumber)
+		}
+		
+		$msg += "$($theError.Exception.InnerException.Message)`n$($theError.ScriptStackTrace)"  
+	}
+	else
+	{
+		$msg += "`n"+$theError.ToString()+"`n"+$theError.ScriptStackTrace.ToString()
+	}
+	$msg += "`n$sql"
 
-.Parameter dbName
-	database name
+	$msg
+}
 
-.Parameter dbConnectionString
-	the connection string
+function _runSql
+{
+[CmdletBinding(SupportsShouldProcess)]
+param
+( $tmpSql, $cmd, $dbConnnectionString, $scalar, $queries, $wantCount, $dontThrow )
 
-.Parameter command
-	the command to run 
-	
-.Parameter parameters
-	optional hash table of substitution values.  If name not prefixed with @, will add it
-	
-.Parameter scalar
-	true if execute as scalar command, otherwise executes as non query
-	
-.Parameter timeoutSecs
-	timeout for connection in seconds, defaults to 120 (2 minutes)
-	
-.Parameter wantCount
-	set if you want the rowsAffected returned if not scalar
-	
-.Outputs
-	number of rows affected, or nothing if wantCount is false
-#>
-Function Invoke-DbNonQuery
+	If($tmpSql -and $tmpSql.Trim()) 
+	{ 
+		if ( $PSCmdlet.ShouldProcess($dbConnectionString, $tmpSql.Trim() ) )
+		{
+			try 
+			{
+				$Cmd.CommandText = $tmpSql
+				_setParameters $parameters $Cmd
+				_writeTraceMessage "executing: $tmpSql"
+						
+				if ( $scalar )
+				{
+					$ret = $Cmd.ExecuteScalar()
+					_writeTraceMessage "Scalar return is $ret"
+					$ret 
+				}
+				elseif ( $queries )
+				{
+					$ret = $Cmd.ExecuteReader()
+					while ( $ret.Read() )
+					{
+						Invoke-Command -ScriptBlock $fn -ArgumentList $ret 
+					}
+					while ( $ret.NextResult() )
+					{
+						while ( $ret.Read() )
+						{
+							Invoke-Command -ScriptBlock $fn -ArgumentList $ret 
+						}
+					}
+					$ret.Close()
+				}
+				else
+				{
+					$ret = $Cmd.ExecuteNonQuery()
+					if ( $wantCount )
+					{
+						_writeTraceMessage "Want count return is $ret"
+						$ret
+					}
+				}
+            }
+            catch
+            {
+				if ( $dontThrow )
+				{
+					Write-LogMessage Warning "Exception running SQL: $tmpSql`n$_"
+				}
+				else
+				{
+					throw "Exception running SQL: $tmpSql`n$_"
+				}
+            }
+		}
+	}
+}
+
+function _invokeSql
 {
 [CmdletBinding(DefaultParameterSetName="Server",SupportsShouldProcess)]
 param(
-[Parameter(Position=0,Mandatory,ParameterSetName="Server")]
 [string]$server,
-[Parameter(Position=1,Mandatory,ParameterSetName="Server")]
 [string] $dbName,
-[Parameter(Position=0,Mandatory,ParameterSetName="ConnStr")]
 [string]$dbConnectionString,
-[Parameter(Position=1,Mandatory,ParameterSetName="ConnStr")]
-[Parameter(Position=2,Mandatory,ParameterSetName="Server")]
-[string] $command,
+$Conn,
+$cmd,
+[Parameter(ValueFromPipeline=$true)]
+[String] $command,
 [hashtable] $parameters,
-[switch] $scalar,
 [ValidateRange(1,100000)]
 [int] $timeoutSecs = 1200,
-[switch] $wantCount
+[switch] $queries,
+[scriptblock] $fn,
+[switch] $scalar,
+[switch] $wantCount,
+[switch] $dontThrow
 )
 
-	$ret = $null
-	$Cmd = $null
-	$Conn = $null
-	
-	if ( $server -and $dbName )
+	begin
 	{
-		$dbConnectionString = "Server=$server;Initial Catalog=$dbName;Integrated Security=True;MultipleActiveResultSets=True"
-	}
+		$openedConn = -not $conn -and -not $cmd
+		if ( $openedConn )
+		{
+			if ( $server -and $dbName )
+			{
+				$dbConnectionString = "Server=$server;Initial Catalog=$dbName;Integrated Security=True;MultipleActiveResultSets=True"
+			}
+			elseif ( -not $dbConnectionString )
+			{
+				throw "Invalid parameters.  Must supply connection, database, or connection string"
+			}
 
-	if ( $PSCmdlet.ShouldProcess($dbConnectionString, $command ) )
+
+			#Setting Up Sql Connection/Command objects & opening the connection
+			$Conn, $Cmd = _openAll $dbConnectionString -timeoutSecs $timeoutSecs
+		}
+
+		$tmpSql = $null
+	}
+	
+	process
 	{
 		try
 		{
-			#Setting Up Sql Connection/Command objects & opening the connection
-			$Conn, $Cmd = _openAll $dbConnectionString $timeoutSecs
-
-			$Cmd.CommandText = $command
-			_setParameters $parameters $Cmd
-
-			if ( $scalar )
+			if ( $PSCmdlet.ShouldProcess($server,"Execute SQL"))
 			{
-				$ret = $Cmd.ExecuteScalar()
+				$s = $command
+				If($s.trim() -like "go*")
+				{
+					_runSql $tmpSql $cmd $dbConnectionString $scalar $queries $wantCount $dontThrow
+					$tmpSql = ""
+				}
+				Else
+				{
+					$tmpSql += [System.Environment]::NewLine
+					$tmpSql += $s
+				}
 			}
-			else
-			{
-				$ret = $Cmd.ExecuteNonQuery()
-			}
-			
-			_unregisterEvent
 		}
-		catch
+		catch 
 		{
-			throw "Error processing ${command}:`r`n" +  ($_ | Out-String )
+			if ( $openedConn )
+			{
+				_closeAll $Cmd $Conn
+				$Cmd = $null
+				$Conn = $null
+			}
+			$theError = $_
+			throw (_formatExceptionMessage $dbConnectionString $tmpSql $theError)
 		}
-		finally
+	}
+	
+	end
+	{
+		Write-LogMessage Verbose "In end"
+		if($tmpSql)
+		{
+			_runSql $tmpSql $cmd $dbConnectionString $scalar $queries $wantCount $dontThrow
+		}
+		if ( $openedConn -and $cmd )
 		{
 			_closeAll $Cmd $Conn
-		}	
-	}		
-	if ( $wantCount -or $scalar )
-	{
-		return $ret
+		}
 	}
 }
+
 
 <#
 .Synopsis
@@ -314,7 +441,7 @@ param(
 	timeout for connection in seconds, defaults to 120 (2 minutes)
 	
 #>
-function Invoke-DbNonQueries
+function Invoke-DbNonQuery
 {
 [CmdletBinding(DefaultParameterSetName="Server",SupportsShouldProcess)]
 param(
@@ -324,77 +451,45 @@ param(
 [string] $dbName,
 [Parameter(Position=0,Mandatory,ParameterSetName="ConnStr")]
 [string]$dbConnectionString,
-[Parameter(Position=1,ParameterSetName="ConnStr")]
-[Parameter(Position=2,ParameterSetName="Server")]
-[Parameter(ValueFromPipeline=$true)]
-[String] $commands,
+[Parameter(Position=2,ValueFromPipeline)]
+[Alias("commands")]
+[String] $command,
 [hashtable] $parameters,
+[switch] $scalar,
 [ValidateRange(1,100000)]
-[int] $timeoutSecs = 1200
+[int] $timeoutSecs = 1200,
+[switch] $wantCount,
+[switch] $dontThrow
 )
-	begin
-	{
-		if ( $server -and $dbName )
-		{
-			$dbConnectionString = "Server=$server;Initial Catalog=$dbName;Integrated Security=True;MultipleActiveResultSets=True"
-		}
+	
 
-		$tmpSql = $null
-		
-		#Setting Up Sql Connection/Command objects & opening the connection
-		$Conn, $Cmd = _openAll $dbConnectionString -timeoutSecs $timeoutSecs
-	}
-	
-	process
-	{
-		try
-		{
-			$s = $commands
-			If($s.trim() -like "go*")
-			{
-				If($tmpSql -and $tmpSql.Trim()) 
-				{ 
-					if ( $PSCmdlet.ShouldProcess($dbConnectionString, $tmpSql.Trim() ) )
-					{
-						$Cmd.CommandText = $tmpSql
-						_setParameters $parameters $Cmd
-						
-						$ret = $Cmd.ExecuteNonQuery()
-					}
-				}
-				$tmpSql = $null
-			}
-			Else
-			{
-				$tmpSql += [System.Environment]::NewLine
-				$tmpSql += $s
-			}
-		}
-		catch 
-		{
-			_closeAll $Cmd $Conn
-			throw "Error processing ${tmpSql}:`r`n" +  ($_ | Out-String )
-		}
-	}
-	
-	end
-	{
-		if($tmpSql)
-		{
-			if ( $PSCmdlet.ShouldProcess($dbConnectionString, $tmpSql.Trim() ) )
-			{
-				$Cmd.CommandText = $tmpSql
-				_setParameters $parameters $Cmd
-				
-				$ret = $Cmd.ExecuteNonQuery()
-			}
-		}
-		_unregisterEvent		
-		_closeAll $Cmd $Conn
-	}
+begin
+{
+	# get pipeline so we cascade it from this script
+    $outBuffer = $null
+    if ($PSBoundParameters.TryGetValue(‘OutBuffer’, [ref]$outBuffer))
+    {
+        $PSBoundParameters[‘OutBuffer’] = 1
+    }
+    $wrappedCmd = Get-command "_invokeSql" 
+    $sb = {& $wrappedCmd @PSBoundParameters } 
+
+    $sp = $sb.GetSteppablePipeline($myInvocation.CommandOrigin)
+	$count = 0
+	$sp.Begin($PSCmdLet)
 }
 
+process
+{
+	$sp.Process($_)
+}
 
+end
+{
+	$sp.End()
+}
+
+}
 
 <#
 .Synopsis
@@ -418,15 +513,20 @@ param(
 .Parameter parameters
 	optional hash table of substitution values.  If name not prefixed with @, will add it
 	
+.Outputs 
+	None
+
 .Example
 	Run a query and add each first column to an array
 	
+	@script:uiSites = @() 
 	Get-DbRow $connStr { param([System.Data.SqlClient.SqlDataReader]$reader) $Script:uiSites += ,$reader[0] } $uiSiteSql 
 
 .Example
 
 	Run a query and add each first column to an array
 	
+	@script:uiSites = @() 
 	ExecuteQuery $server mydatabasename { param([System.Data.SqlClient.SqlDataReader]$reader) $Script:uiSites += ,$reader[0] } $uiSiteSql
 #>
 Function Get-DbRow
@@ -448,48 +548,7 @@ param(
 [int] $timeoutSecs = 1200
 )
 
-	if ( $server -and $dbName )
-	{
-		$dbConnectionString = "Server=$server;Initial Catalog=$dbName;Integrated Security=True;MultipleActiveResultSets=True"
-	}
-
-	$ret = $null
-	$Cmd = $null
-	$Conn = $null
-	try
-	{
-		if ( $PSCmdlet.ShouldProcess($dbConnectionString, $query ) )
-		{
-			#Setting Up Sql Connection/Command objects & opening the connection
-			$Conn, $Cmd = _openAll $dbConnectionString -timeoutSecs $timeoutSecs
-
-			$Cmd.CommandText = $query
-			_setParameters $parameters $Cmd
-			
-			$ret = $Cmd.ExecuteReader()
-			while ( $ret.Read() )
-			{
-				Invoke-Command -ScriptBlock $fn -ArgumentList $ret 
-			}
-		}
-	}
-	catch
-	{
-		throw "Error processing ${query}:`r`n" +  ($_ | Out-String )
-	}
-	finally
-	{
-		_unregisterEvent		
-		
-		if ( $ret )
-		{
-			$ret.Close()
-		}
-		if ( $Cmd -and $Conn )
-		{
-			_closeAll $Cmd $Conn
-		}
-	}	
+	_invokeSql -server $server -dbName $dbName -dbConnectionString $dbConnectionString -command $query -timeoutSecs $timeoutSecs -queries -fn $fn -parameters $parameters
 }
 
 <#
@@ -556,22 +615,15 @@ param(
 		}
 	}
 	
-	if ( $server -and $dbName )
-	{
-		$dbConnectionString = "Server=$server;Initial Catalog=$dbName;Integrated Security=True;MultipleActiveResultSets=True"
-	}
-
 	$script:result = @()
-	
-	Get-DbRow -dbConnectionString $dbConnectionString -query $query -parameters $parameters -fn {  param([System.Data.Common.DbDataReader]$reader)
+	_invokeSql -server $server -dbName $dbName -dbConnectionString $dbConnectionString -command $query -timeoutSecs $timeoutSecs -queries -parameters $parameters -fn {  param([System.Data.Common.DbDataReader]$reader)
 				$cols = @{}
 				for ( $i = 0; $i -lt $reader.FieldCount; $i++ )
 				{
 					$cols[(makeName($reader.GetName($i)))] = $reader[$i]
 				}
 				$script:result += New-Object PSObject -Property $cols
-			} -timeoutSecs $timeoutSecs -Verbose:($VerbosePreference -ne 'SilentlyContinue') -WhatIf:$WhatIfPreference
-			
+			} 
 	return $script:result			
 }
 
@@ -588,7 +640,7 @@ param(
 .Outputs
 	true if it exists on the server
 #>
-Function Test-DatabaseExists
+Function Test-Database
 {
 	param(
 	[Parameter(Position=0, Mandatory)]
@@ -627,11 +679,12 @@ Function Test-DatabaseOnline
 
 # old names now alias to more PShelly names
 Set-Alias Get-DbObjects Get-DbObject 
-Set-Alias Get-DatabaseExists Test-DatabaseExists 
+Set-Alias Get-DatabaseExists Test-Database 
 Set-Alias ExecuteNonQueries Invoke-DbNonQueries
 Set-Alias ExecuteQuery Get-DbRow
 Set-Alias ExecuteObjectQuery Get-DbObject
 Set-Alias ExecuteNonQuery Invoke-DbNonQuery
 Set-Alias ExecuteScalar Invoke-DbScalar
+Set-Alias Invoke-DbNonQueries Invoke-DbNonQuery
 
 Export-ModuleMember -Function 'Execute*','*-*' -Alias * -Variable 'ADOPrintHandler*'
