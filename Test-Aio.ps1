@@ -2,14 +2,21 @@
 # 429 is thorttle raise
 # else > 400 raise
 
+<<<<<<< HEAD
+$baseUri = "http://localhost:8081" 
+$baseUri = "http://io.adafruit.com/api"
+$aioKey = '3a520c87c4ac836552c6c2703abebdfbb32327ad'
+$feedName = "Welcome%20Feed" # "welcome-feed"
+=======
 $baseUri = "https://io.adafruit.com/api"
 $aioKey = 'zzzzzzzzzzzzzzzzzzzzzzzz'
 $feedName = "Welcome Feed"
+>>>>>>> 449506729141ee27792dd415b48d29f4b6d1d7e8
 $groupKey = "my-feeds"
 
 # groups 
 
-$groups = Invoke-RestMethod -Uri "$baseUri/groups" -Method Get -ContentType 'application/json' -Headers @{'X-AIO-Key'=$aioKey} 
+$groups = Invoke-RestMethod -Uri "$baseUri/groups set" -Method Get -ContentType 'application/json' -Headers @{'X-AIO-Key'=$aioKey} 
 $groups | ft -a
 Invoke-RestMethod -Uri "$baseUri/groups/$groupKey" -Method Get -ContentType 'application/json' -Headers @{'X-AIO-Key'=$aioKey} 
 
@@ -80,7 +87,7 @@ Invoke-RestMethod -Method Get -Uri "$baseUri/feeds/$feedName/data/$id" -ContentT
 
 $result = Invoke-WebRequest -Method Get -Uri "$baseUri/feeds/$feedName/data/$id" -ContentType 'application/json' -Headers @{'X-AIO-Key'=$aioKey} 
 
-
+$i = 12
 # new row
 foreach ( $i in 123..456)
 {
