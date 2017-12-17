@@ -42,6 +42,16 @@ param(
 	if ( Get-Member -InputObject $object -Name $Name)
 	{
 		$value = $object.$Name
+		if ( $PSVersionTable.PSVersion.Major -gt 5 -and -not $IsWindows )
+		{
+			$DecryptString = $false  # Core 2.0 doesn't support encrypt/descypt
+			if ( $AsSecureString )
+			{
+				Write-Warning "AsSecureString not supported in PS Core"
+				return ""
+			}
+		}
+
 		if ( $AsSecureString -or $DecryptString )
 		{
 			$secureString = $value | ConvertTo-SecureString

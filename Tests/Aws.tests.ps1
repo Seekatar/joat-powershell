@@ -1,4 +1,4 @@
-. (Join-Path $PSScriptRoot "..\Aws\Invoke-AwsPaced.ps1")
+Import-Module (Join-Path $PSScriptRoot ..\aws.psm1) -Force
 
 Describe "AwsTests" {
 

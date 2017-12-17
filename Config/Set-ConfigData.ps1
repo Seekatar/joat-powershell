@@ -17,8 +17,11 @@ Return the encrypted data as a SecureString
 .PARAMETER EncryptString
 Encrypt the string when storing it.  Only the current use can decrypt it.
 
+.NOTES
+Currently encryption only supported on Windows.  On Linux/OSX secure the config file.
+
 .EXAMPLE
-An example
+Set-ConfigData $env:home/myconfig.json -Name ItemName -Value "testing123"
 #>
 function Set-ConfigData
 {
@@ -44,8 +47,17 @@ param(
 		$object = [PSCustomObject]@{}
 	}
 
+	if ( $PSVersionTable.PSVersion.Major -gt 5 -and -not $IsWindows )
+	{
+		$EncryptString = $false # Core 2.0 doesn't support encrypt/descypt
+	}
+
 	if ( $value -is 'SecureString' )
 	{
+		if ( $PSVersionTable.PSVersion.Major -gt 5 -and -not $IsWindows )
+		{
+			throw "SecureString encryption not supported in Core"
+		}
 		$value = ConvertFrom-SecureString $Value
 	}
 	elseif ( $EncryptString )
