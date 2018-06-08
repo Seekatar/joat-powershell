@@ -23,14 +23,14 @@ function doModule( $moduleName )
     @"
 ## $($module.Name) Module
 ``````PowerShell
-Import-Module $_
+Import-Module $moduleName
 ``````
 
 Command     | Synopsis
 ------------|---------|
 "@
     Get-Command -Module $module | ForEach-Object {
-        $help = Get-help $_ | Where-Object ModuleName -eq $module 
+        $help = Get-help $_ | Where-Object ModuleName -eq $module
         $desc = "";
         if ( $help -and $help.synopsis )
         {
@@ -44,7 +44,7 @@ Command     | Synopsis
 
 function doLooseFiles( $folderName )
 {
-    $files = Get-ChildItem *-*.ps1 
+    $files = Get-ChildItem *-*.ps1
     if ( -not $files )
     {
         return
@@ -66,18 +66,18 @@ Command     | Synopsis
 
 function doFolder( $folder, $Recurse )
 {
-  Push-Location $_
-  Write-Progress -Activity $progressActivity -Status $_
-  
+  Push-Location $folder
+  Write-Progress -Activity $progressActivity -Status $folder
+
   $module = Get-Item *.psm1
   if ( $module )
   {
-    Write-Progress -Activity $progressActivity -Status "$_ - $module"
+    Write-Progress -Activity $progressActivity -Status "$folder - $module"
     $module | ForEach-Object { doModule $_ }
-  } 
+  }
   else
   {
-      doLooseFiles $_
+      doLooseFiles $folder
       if ( $Recurse )
       {
         Get-ChildItem -Directory | Where-Object name -notin $FolderExcludes | ForEach-Object {
@@ -90,11 +90,13 @@ function doFolder( $folder, $Recurse )
 
 if ( "." -notin $FolderExcludes )
 {
-  doLooseFiles $PWD
+    doFolder $PWD $Recurse
 }
-
-Get-ChildItem -Directory | Where-Object name -notin $FolderExcludes | ForEach-Object {
-    doFolder $_ $Recurse
+else
+{
+    Get-ChildItem -Directory | Where-Object name -notin $FolderExcludes | ForEach-Object {
+        doFolder $_ $Recurse
+    }
 }
 
 Write-Progress $progressActivity -Completed
