@@ -16,9 +16,8 @@ function Remove-ConfigData
 [CmdletBinding()]
 param(
 [Parameter(Mandatory)]
-[string] $Path,
-[Parameter(Mandatory)]
-[string] $Name
+[string] $Name,
+[string] $Path = "$env:home/myconfig.json"
 )
 	Set-StrictMode -Version Latest
 

@@ -7,8 +7,8 @@ Describe "StringTests" {
         (Get-ConfigData -Path $path -Name "String1") | Should be "abc"
 	}
 	It "SetsGetsEncryptedString" {
-        Set-ConfigData -Path $path -Name "String2" -Value "abc" -EncryptString
-        (Get-ConfigData -Path $path -Name "String2" -DecryptString) | Should be "abc"
+        Set-ConfigData -Path $path -Name "String2" -Value "abc" -Encrypt
+        (Get-ConfigData -Path $path -Name "String2" -Decrypt) | Should be "abc"
 	}
     It "RemovesString" {
         Remove-ConfigData -Path $path -Name "String2" | should be $true
@@ -29,8 +29,8 @@ Describe "ObjectTest" {
         $ret.a.b | Should be "testing"
     }
     It "SetGetsEncryptedObject" {
-        Set-ConfigData -Path $path -Name "String2" -Value $o -EncryptString
-        $ret = (Get-ConfigData -Path $path -Name "String2" -DecryptString)
+        Set-ConfigData -Path $path -Name "String2" -Value $o -Encrypt
+        $ret = (Get-ConfigData -Path $path -Name "String2" -Decrypt)
         $ret.a.b | Should be "testing"
     }
 
@@ -53,8 +53,8 @@ Describe "MoreComplexObjectTest" {
         $ret.a.tenantId | Should be 345
     }
     It "SetGetsEncryptedObject" {
-        Set-ConfigData -Path $path -Name "String2" -Value $o -EncryptString
-        $ret = (Get-ConfigData -Path $path -Name "String2" -DecryptString)
+        Set-ConfigData -Path $path -Name "String2" -Value $o -Encrypt
+        $ret = (Get-ConfigData -Path $path -Name "String2" -Decrypt)
         $ret.a.user | Should be "testing"
         $ret.a.tenantId | Should be 345
     }
@@ -67,15 +67,15 @@ Describe "SecureStringTest" {
     Write-Warning $path
     $ss = ConvertTo-SecureString -String "monkey123" -AsPlainText -Force
 
-    It "SetGetsEncryptedObject" {
+    It "SetGetsSecureString" {
         Set-ConfigData -Path $path -Name "SString" -Value $ss
         $ret = (Get-ConfigData -Path $path -Name "SString" -AsSecureString)
         $ret | Should beoftype 'SecureString'
     }
 
-    It "SetGetsEncryptedObject" {
+    It "SetGetSecureStringDecrypts" {
         Set-ConfigData -Path $path -Name "SString" -Value $ss
-        $ret = (Get-ConfigData -Path $path -Name "SString" -AsSecureString -DecryptString)
+        $ret = (Get-ConfigData -Path $path -Name "SString" -Decrypt)
         $ret | Should be 'monkey123'
     }
     Remove-Item $path

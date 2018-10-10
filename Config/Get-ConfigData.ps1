@@ -11,7 +11,7 @@ Name of the config data to get
 .PARAMETER AsSecureString
 Return the encrypted data as a SecureString
 
-.PARAMETER DecryptString
+.PARAMETER Decrypt
 Return encrypted data in clear text
 
 .PARAMETER NoWarnIfNotFound
@@ -28,15 +28,18 @@ function Get-ConfigData
 [CmdletBinding()]
 param(
 [Parameter(Mandatory)]
-[ValidateScript({Test-Path $_ -PathType Leaf})]
-[string] $Path,
-[Parameter(Mandatory)]
 [string] $Name,
 [switch] $AsSecureString,
-[switch] $DecryptString,
-[switch] $NoWarnIfNotFound
+[switch] $Decrypt,
+[switch] $NoWarnIfNotFound,
+[string] $Path = "$env:home/myconfig.json"
 )
 	Set-StrictMode -Version Latest
+
+	if ( -not (Test-Path $Path -PathType Leaf))
+	{
+		throw "Path $Path not found"
+	}
 
 	$object = Get-Content $path -Raw | ConvertFrom-Json
 	if ( Get-Member -InputObject $object -Name $Name)
@@ -44,7 +47,7 @@ param(
 		$value = $object.$Name
 		if ( $PSVersionTable.PSVersion.Major -gt 5 -and -not $IsWindows )
 		{
-			$DecryptString = $false  # Core 2.0 doesn't support encrypt/descypt
+			$decryptedtString = $false  # Core 2.0 doesn't support encrypt/decrypt
 			if ( $AsSecureString )
 			{
 				Write-Warning "AsSecureString not supported in PS Core"
@@ -52,25 +55,43 @@ param(
 			}
 		}
 
-		if ( $AsSecureString -or $DecryptString )
+		$value = ConvertFrom-Json $value
+		$isSecureString = [bool](Get-Member -InputObject $value -Name "Secure-String" -MemberType NoteProperty )
+		$isEncryptedObject = [bool](Get-Member -InputObject $value -Name "Encrypted-Object" -MemberType NoteProperty )
+		Write-Verbose "isSecureString = $isSecureString isEncryptedObject = $isEncryptedObject"
+		if ( $isSecureString -or $isEncryptedObject)
 		{
-			$secureString = $value | ConvertTo-SecureString
-			if ( $DecryptString )
+			if ( $isEncryptedObject )
 			{
-				$value = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureString))
+				$value = $value."Encrypted-Object"
 			}
 			else
 			{
-				$value = $secureString
+				$value = $value."Secure-String"
 			}
-		}
-		if ( $AsSecureString)
-		{
-			$value
+			Write-Verbose "Value is $value"
+			$secureString = $value | ConvertTo-SecureString
+
+			if ( $Decrypt )
+			{
+				$decryptedtString = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureString))
+				if ( $isEncryptedObject )
+				{
+					ConvertFrom-Json $decryptedtString
+				}
+				else
+				{
+					$decryptedtString
+				}
+			}
+			else
+			{
+				$secureString
+			}
 		}
 		else
 		{
-			ConvertFrom-Json $value
+			$value
 		}
 	}
 	elseif ( -not $NoWarnIfNotFound )

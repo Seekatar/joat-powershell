@@ -18,12 +18,15 @@ function Find-ConfigData
 {
 [CmdletBinding()]
 param(
-[Parameter(Mandatory)]
-[ValidateScript({Test-Path $_ -PathType Leaf})]
-[string] $Path,
-[string] $NameLike = '*'
+[string] $NameLike = '*',
+[string] $Path = "$env:home/myconfig.json"
 )
     Set-StrictMode -Version Latest
+
+	if ( -not (Test-Path $Path -PathType Leaf))
+	{
+		throw "Path $Path not found"
+	}
 
     $object = Get-Content $path -Raw | ConvertFrom-Json
     Get-Member -InputObject $object -MemberType NoteProperty | Where-Object Name -like $NameLike | Select-Object -ExpandProperty Name

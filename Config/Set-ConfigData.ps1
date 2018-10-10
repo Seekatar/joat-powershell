@@ -14,26 +14,26 @@ Object to save in the config.  May be simple or an object to ConvertTo-Json
 .PARAMETER AsSecureString
 Return the encrypted data as a SecureString
 
-.PARAMETER EncryptString
-Encrypt the string when storing it.  Only the current use can decrypt it.
+.PARAMETER Encrypt
+Encrypt the data when storing it.  Only the current user can decrypt it.
 
 .NOTES
 Currently encryption only supported on Windows.  On Linux/OSX secure the config file.
 
 .EXAMPLE
-Set-ConfigData $env:home/myconfig.json -Name ItemName -Value "testing123"
+Set-ConfigData -Name ItemName -Value "testing123" $env:home/myconfig.json
 #>
 function Set-ConfigData
 {
 [CmdletBinding()]
 param(
 [Parameter(Mandatory)]
-[string] $Path,
-[Parameter(Mandatory)]
 [string] $Name,
 [Parameter(Mandatory)]
 [object] $Value,
-[switch] $EncryptString
+[switch] $Encrypt,
+[int32] $JsonDepth = 2,
+[string] $Path = "$env:home/myconfig.json"
 )
 	Set-StrictMode -Version Latest
 
@@ -49,24 +49,24 @@ param(
 
 	if ( $PSVersionTable.PSVersion.Major -gt 5 -and -not $IsWindows )
 	{
-		$EncryptString = $false # Core 2.0 doesn't support encrypt/descypt
+		$Encrypt = $false # Core 2.0 doesn't support encrypt/decrypt
 	}
 
-	if ( $value -is 'SecureString' )
+	if ( $Value -is 'SecureString' )
 	{
 		if ( $PSVersionTable.PSVersion.Major -gt 5 -and -not $IsWindows )
 		{
 			throw "SecureString encryption not supported in Core"
 		}
-		$value = ConvertFrom-SecureString $Value
+		$value = ConvertTo-Json @{ "Secure-String" = (ConvertFrom-SecureString $Value) } -Compress
 	}
-	elseif ( $EncryptString )
+	elseif ( $Encrypt )
 	{
-		$value = ConvertTo-SecureString (ConvertTo-Json $Value) -asplaintext -force | ConvertFrom-SecureString
+		$value = ConvertTo-Json @{ "Encrypted-Object" =  (ConvertFrom-SecureString (ConvertTo-SecureString (ConvertTo-Json $Value) -asplaintext -force)) } -Compress
 	}
 	else
 	{
-		$value = (ConvertTo-Json $Value)
+		$value = (ConvertTo-Json $Value -Compress -Depth $JsonDepth)
 	}
 
 	if ( -not (Get-Member -InputObject $object -Name $Name))
