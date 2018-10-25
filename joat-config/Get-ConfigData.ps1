@@ -2,9 +2,6 @@
 .SYNOPSIS
 Get data from a JSON config file
 
-.PARAMETER Path
-Path to the config file
-
 .PARAMETER Name
 Name of the config data to get
 
@@ -17,8 +14,11 @@ Return encrypted data in clear text
 .PARAMETER NoWarnIfNotFound
 Don't kick out a Warning message if not found
 
+.PARAMETER Path
+Path to the config file
+
 .EXAMPLE
-An example
+Get-ConfigData Key
 
 .OUTPUTS
 Object from config file, or $null
@@ -99,3 +99,6 @@ param(
 		Write-Warning "Didn't find value named $name in $path"
 	}
 }
+
+
+New-Alias -Name gcfgd -Value Get-ConfigData

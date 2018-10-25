@@ -2,20 +2,20 @@
 .SYNOPSIS
 Set data in a JSON config file
 
-.PARAMETER Path
-Path to the config file
-
 .PARAMETER Name
-Name of the config data to get
+Name of the config data to set
 
 .PARAMETER Value
 Object to save in the config.  May be simple or an object to ConvertTo-Json
 
-.PARAMETER AsSecureString
-Return the encrypted data as a SecureString
-
 .PARAMETER Encrypt
 Encrypt the data when storing it.  Only the current user can decrypt it.
+
+.PARAMETER JsonDepth
+The -Depth parameter for ConvertTo-Json defaults to 2
+
+.PARAMETER Path
+Path to the config file
 
 .NOTES
 Currently encryption only supported on Windows.  On Linux/OSX secure the config file.
@@ -79,3 +79,5 @@ param(
 	}
 	Set-Content $path -Value (ConvertTo-Json $object)
 }
+
+New-Alias -Name scfgd -Value Set-ConfigData

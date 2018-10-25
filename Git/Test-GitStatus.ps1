@@ -7,6 +7,9 @@ Text of repo and if it has pending changes
 #>
 function Test-GitStatus
 {
+[CmdletBinding()]
+param()
+
     Set-StrictMode -Version Latest
 
     function testGit( $parent )
@@ -30,8 +33,9 @@ function Test-GitStatus
     {
         $progress = "Checking folder"
         Write-Progress -Activity $progress -Status "Scanning folders under $PWD..."
-        foreach ( $gitDir in (Get-ChildItem -Directory -Recurse ".git" ))
+        foreach ( $gitDir in (Get-ChildItem -Directory -Recurse ".git" -Hidden))
         {
+            Write-Verbose "Checking $gitDir"
             Write-Progress -Activity $progress -Status $gitDir
             $parent = Split-Path $gitDir -Parent
             Push-Location $parent

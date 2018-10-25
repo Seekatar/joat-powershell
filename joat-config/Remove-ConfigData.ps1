@@ -2,11 +2,11 @@
 .SYNOPSIS
 Removes data in a JSON config file
 
-.PARAMETER Path
-Path to the config file
-
 .PARAMETER Name
 Name of the config data to remove
+
+.PARAMETER Path
+Path to the config file
 
 .OUTPUTS
 $True if found and removed, $False if not found or file doesn't exist
@@ -37,3 +37,5 @@ param(
 
     $false
 }
+
+New-Alias -Name rcfgd -Value Remove-ConfigData
