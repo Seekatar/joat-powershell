@@ -12,4 +12,5 @@ param()
     {
         throw "Git not in path or not installed"
     }
+    Write-Verbose "Git installed"
 }
