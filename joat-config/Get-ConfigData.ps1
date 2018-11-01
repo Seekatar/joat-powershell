@@ -32,9 +32,11 @@ param(
 [switch] $AsSecureString,
 [switch] $Decrypt,
 [switch] $NoWarnIfNotFound,
-[string] $Path = "$env:home/myconfig.json"
+[string] $Path
 )
 	Set-StrictMode -Version Latest
+
+	$Path = Get-ConfigDataPath $Path
 
 	if ( -not (Test-Path $Path -PathType Leaf))
 	{

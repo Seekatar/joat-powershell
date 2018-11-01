@@ -17,9 +17,11 @@ function Remove-ConfigData
 param(
 [Parameter(Mandatory)]
 [string] $Name,
-[string] $Path = "$env:home/myconfig.json"
+[string] $Path
 )
-	Set-StrictMode -Version Latest
+    Set-StrictMode -Version Latest
+
+	$Path = Get-ConfigDataPath $Path
 
 	$object = $null
 	if ( Test-Path $Path )
