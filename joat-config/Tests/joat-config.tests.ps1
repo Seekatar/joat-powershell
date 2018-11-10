@@ -18,6 +18,32 @@ Describe "StringTests" {
     Remove-Item $path
 }
 
+
+Describe "Wildcard tests" {
+    $path = [System.IO.Path]::GetTempFileName()
+	It "Gets two values" {
+        Set-ConfigData -Path $path -Name "String1" -Value "abc"
+        Set-ConfigData -Path $path -Name "String2" -Value "abc2"
+        Set-ConfigData -Path $path -Name "Number" -Value 1
+        $data = Get-ConfigData -Path $path -Name "String*"
+        $data.Count| Should be 2
+        $data[0] | Should be "abc"
+        $data[1] | Should be "abc2"
+	}
+	It "Gets two values with names" {
+        Set-ConfigData -Path $path -Name "String1" -Value "abc"
+        Set-ConfigData -Path $path -Name "String2" -Value "abc2"
+        Set-ConfigData -Path $path -Name "Number" -Value 1
+        $data = Get-ConfigData -Path $path -Name "String*" -WithName
+        $data.Count| Should be 2
+        $data[0].Name | Should be "String1"
+        $data[1].Name | Should be "String2"
+        $data.Value[0] | Should be "abc"
+        $data.Value[1] | Should be "abc2"
+	}
+    Remove-Item $path
+}
+
 Describe "ObjectTest" {
     $path = [System.IO.Path]::GetTempFileName()
     Write-Verbose "Cfg path is $path"

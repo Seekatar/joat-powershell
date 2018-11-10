@@ -3,7 +3,7 @@
 Get data from a JSON config file
 
 .PARAMETER Name
-Name of the config data to get
+Name of the config data to get.  Wildcards are supports, see WithName
 
 .PARAMETER AsSecureString
 Return the encrypted data as a SecureString
@@ -17,6 +17,9 @@ Don't kick out a Warning message if not found
 .PARAMETER Path
 Path to the config file
 
+.PARAMETER WithName
+If set, will emit object with name/value instead of just value, useful when using wildcards
+
 .EXAMPLE
 Get-ConfigData Key
 
@@ -27,12 +30,13 @@ function Get-ConfigData
 {
 [CmdletBinding()]
 param(
-[Parameter(Mandatory)]
+[Parameter()]
 [string] $Name,
 [switch] $AsSecureString,
 [switch] $Decrypt,
 [switch] $NoWarnIfNotFound,
-[string] $Path
+[string] $Path,
+[switch] $WithName
 )
 	Set-StrictMode -Version Latest
 
@@ -44,9 +48,10 @@ param(
 	}
 
 	$object = Get-Content $path -Raw | ConvertFrom-Json
-	if ( Get-Member -InputObject $object -Name $Name)
+	$members = Get-Member -InputObject $object | Where-Object Name -like $Name | select -ExpandProperty name
+	foreach( $member in $members )
 	{
-		$value = $object.$Name
+		$value = $object.$member
 		if ( $PSVersionTable.PSVersion.Major -gt 5 -and -not $IsWindows )
 		{
 			$decryptedtString = $false  # Core 2.0 doesn't support encrypt/decrypt
@@ -79,28 +84,31 @@ param(
 				$decryptedtString = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureString))
 				if ( $isEncryptedObject )
 				{
-					ConvertFrom-Json $decryptedtString
+					$value = ConvertFrom-Json $decryptedtString
 				}
 				else
 				{
-					$decryptedtString
+					$value = $decryptedtString
 				}
 			}
 			else
 			{
-				$secureString
+				$value = $secureString
 			}
+		}
+		if ( $WithName )
+		{
+			[PSCustomObject] @{Name=$member;Value=$value}
 		}
 		else
 		{
 			$value
 		}
 	}
-	elseif ( -not $NoWarnIfNotFound )
+	if ( !$members -and !$NoWarnIfNotFound )
 	{
 		Write-Warning "Didn't find value named $name in $path"
 	}
 }
-
 
 New-Alias -Name gcd -Value Get-ConfigData
