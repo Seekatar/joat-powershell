@@ -53,4 +53,8 @@ param(
     if ( $PSCmdlet.ShouldProcess($ManifestPath,"Set module version to $newVersion"))
     {
         Update-ModuleManifest -Path $ManifestPath -ModuleVersion $newVersion -Verbose:$false
+        # strip trailing whitespace the above command adds
+        $temp = New-TemporaryFile
+        Get-Content $ManifestPath | ForEach-Object { $_.TrimEnd(); } | Out-File -Append -FilePath $temp -Encoding utf8
+        Copy-Item $temp $ManifestPath
     }
