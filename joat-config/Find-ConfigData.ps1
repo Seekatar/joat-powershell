@@ -41,4 +41,4 @@ param(
     Get-Member -InputObject $object -MemberType NoteProperty | Where-Object Name -like $NameLike | Select-Object -ExpandProperty Name
 }
 
-New-Alias -Name fcfgd -Value Find-ConfigData
+New-Alias -Name fcd -Value Find-ConfigData

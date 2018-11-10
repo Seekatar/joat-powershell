@@ -4,4 +4,4 @@ foreach( $i in (Get-ChildItem (Join-Path $PSScriptRoot "*.ps1") -File -Exclude *
     . $i
 }
 
-Export-ModuleMember -Function "Find-ConfigData","Get-ConfigData","Set-ConfigData"   
+Export-ModuleMember -Function "Find-ConfigData","Get-ConfigData","Set-ConfigData","Remove-ConfigData" -Alias *

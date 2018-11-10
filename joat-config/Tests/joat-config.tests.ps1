@@ -1,4 +1,4 @@
-Import-Module (Join-Path $PSScriptRoot ..\config.psm1) -Force
+Import-Module (Join-Path $PSScriptRoot ..\joat-config.psm1) -Force
 
 Describe "StringTests" {
     $path = [System.IO.Path]::GetTempFileName()
@@ -20,7 +20,7 @@ Describe "StringTests" {
 
 Describe "ObjectTest" {
     $path = [System.IO.Path]::GetTempFileName()
-    Write-Warning $path
+    Write-Verbose "Cfg path is $path"
     $o = @{ a = @{ b = "testing"} }
 
     It "SetGetsObject" {
@@ -39,7 +39,7 @@ Describe "ObjectTest" {
 
 Describe "MoreComplexObjectTest" {
     $path = [System.IO.Path]::GetTempFileName()
-    Write-Warning $path
+    Write-Verbose "Cfg path is $path"
     $o = @{ a = @{ user = "testing"
                    password = "pw"
                    clientId = 123
@@ -64,7 +64,7 @@ Describe "MoreComplexObjectTest" {
 
 Describe "SecureStringTest" {
     $path = [System.IO.Path]::GetTempFileName()
-    Write-Warning $path
+    Write-Verbose "Cfg path is $path"
     $ss = ConvertTo-SecureString -String "monkey123" -AsPlainText -Force
 
     It "SetGetsSecureString" {

@@ -36,3 +36,5 @@ if ( -not $Path )
 $Path
 
 }
+
+New-Alias gcdp -Value Get-ConfigDataPath

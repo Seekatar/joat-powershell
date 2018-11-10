@@ -82,4 +82,4 @@ param(
 	Set-Content $path -Value (ConvertTo-Json $object)
 }
 
-New-Alias -Name scfgd -Value Set-ConfigData
+New-Alias -Name scd -Value Set-ConfigData

@@ -40,4 +40,4 @@ param(
     $false
 }
 
-New-Alias -Name rcfgd -Value Remove-ConfigData
+New-Alias -Name rcd -Value Remove-ConfigData

@@ -103,4 +103,4 @@ param(
 }
 
 
-New-Alias -Name gcfgd -Value Get-ConfigData
+New-Alias -Name gcd -Value Get-ConfigData
