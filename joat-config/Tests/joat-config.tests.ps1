@@ -1,3 +1,6 @@
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingConvertToSecureStringWithPlainText","")]
+param()
+
 Import-Module (Join-Path $PSScriptRoot ..\joat-config.psm1) -Force
 
 Describe "StringTests" {

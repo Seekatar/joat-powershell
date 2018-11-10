@@ -13,7 +13,8 @@ $True if found and removed, $False if not found or file doesn't exist
 #>
 function Remove-ConfigData
 {
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess)]
+[OutputType([Bool])]
 param(
 [Parameter(Mandatory)]
 [string] $Name,
@@ -24,14 +25,17 @@ param(
 	$Path = Get-ConfigDataPath $Path
 
 	$object = $null
-	if ( Test-Path $Path )
+	if ( Test-Path $Path -PathType Leaf)
 	{
 		$object = Get-Content $path -Raw | ConvertFrom-Json
 
         if ( Get-Member -InputObject $object -Name $Name )
         {
             $object.PSObject.Properties.Remove($Name)
-        	Set-Content $path -Value (ConvertTo-Json $object)
+            if ( $PSCmdlet.ShouldProcess($Path,"Remove ConfigData $Name"))
+            {
+                Set-Content $path -Value (ConvertTo-Json $object)
+            }
             return $true
         }
 

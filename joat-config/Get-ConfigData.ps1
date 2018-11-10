@@ -29,6 +29,7 @@ Object from config file, or $null
 function Get-ConfigData
 {
 [CmdletBinding()]
+[OutputType([string],[PSCustomObject])]
 param(
 [Parameter()]
 [string] $Name,
@@ -48,7 +49,7 @@ param(
 	}
 
 	$object = Get-Content $path -Raw | ConvertFrom-Json
-	$members = Get-Member -InputObject $object | Where-Object Name -like $Name | select -ExpandProperty name
+	$members = Get-Member -InputObject $object | Where-Object Name -like $Name | Select-Object -ExpandProperty name
 	foreach( $member in $members )
 	{
 		$value = $object.$member

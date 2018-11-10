@@ -25,7 +25,8 @@ Set-ConfigData -Name ItemName -Value "testing123" $env:home/myconfig.json
 #>
 function Set-ConfigData
 {
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess)]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingConvertToSecureStringWithPlainText","")]
 param(
 [Parameter(Mandatory)]
 [string] $Name,
@@ -79,7 +80,10 @@ param(
 	{
 		$object.$name = $value.ToString()
 	}
-	Set-Content $path -Value (ConvertTo-Json $object)
+	if ( $PSCmdlet.ShouldProcess($Path,"Set $Name"))
+	{
+		Set-Content $path -Value (ConvertTo-Json $object)
+	}
 }
 
 New-Alias -Name scd -Value Set-ConfigData

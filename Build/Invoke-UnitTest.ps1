@@ -13,6 +13,9 @@ Name of the PS Module.  Will import ..\$ModuleName\$ModuleName.psd1
 Test tags, defaults to PSSA, UnitTest (PS Script Analyzer)
 
 .EXAMPLE
+..\Build\Invoke-UnitTest.ps1 . .\joat-config.psm1
+
+.EXAMPLE
 .\Invoke-Tests.ps1 -TestFolder $env:Build_SourcesDirectory\Tests -ModulePath $env:ModulePath
 
 Called from AzureDevOps Build pipeline, ModulePath can be .\MyModule\MyModule.psd1, etc.
@@ -23,7 +26,7 @@ param(
 [string] $TestFolder,
 [Parameter(Mandatory)]
 [string] $ModulePath,
-[string[]] $Tags = @("PSSA","UnitTest")
+[string[]] $Tags
 )
 
 if ( $PSVersionTable.PSVersion -lt "5.1")
@@ -41,13 +44,8 @@ if ( -not (Get-Module -Name Pester ) )
 {
     Install-Module -Name Pester -Scope CurrentUser -Force -Confirm:$false -SkipPublisherCheck
 }
-if ( -not (Get-Module -Name PSScriptAnalyzer ) )
-{
-    Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force -Confirm:$false -SkipPublisherCheck
-}
 
 Import-Module Pester
-Import-Module PSScriptAnalyzer
 
 $result = Invoke-Pester -OutputFile 'TEST-PesterResults.xml' -OutputFormat 'NUnitXml' -Tags $tags -PassThru
 if ( $result.FailedCount )
