@@ -52,5 +52,5 @@ param(
 
     if ( $PSCmdlet.ShouldProcess($ManifestPath,"Set module version to $newVersion"))
     {
-        Update-ModuleManifest -Path $ManifestPath -ModuleVersion $newVersion
+        Update-ModuleManifest -Path $ManifestPath -ModuleVersion $newVersion -Verbose:$false
     }
