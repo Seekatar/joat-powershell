@@ -55,8 +55,7 @@ if ( -not (Get-Module -Name PSScriptAnalyzer ) )
 Import-Module Pester
 Import-Module PSScriptAnalyzer
 
-Invoke-Pester -Script @{ Path="$PSSATestScriptPath";Parameters=@{folder="$FolderToAnalyze"}}
-$result = Invoke-Pester -OutputFile $OutputPath -OutputFormat 'NUnitXml' -Tags $tags -PassThru
+$result = Invoke-Pester -Script @{ Path="$PSSATestScriptPath";Parameters=@{folder="$FolderToAnalyze"}} -OutputFile $OutputPath -OutputFormat 'NUnitXml' -Tags $tags -PassThru
 if ( $result.FailedCount )
 {
     throw "Pester tests failed.  Count is $($result.FailedCount)"
