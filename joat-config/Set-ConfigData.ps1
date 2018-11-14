@@ -65,7 +65,14 @@ param(
 	}
 	elseif ( $Encrypt )
 	{
-		$value = ConvertTo-Json @{ "Encrypted-Object" =  (ConvertFrom-SecureString (ConvertTo-SecureString (ConvertTo-Json $Value) -asplaintext -force)) } -Compress
+		if ( $Value -is 'String')
+		{
+			$value = ConvertTo-Json @{ "Encrypted-String" =  (ConvertFrom-SecureString (ConvertTo-SecureString $Value -asplaintext -force)) } -Compress
+		}
+		else
+		{
+			$value = ConvertTo-Json @{ "Encrypted-Object" =  (ConvertFrom-SecureString (ConvertTo-SecureString (ConvertTo-Json $Value) -asplaintext -force)) } -Compress
+		}
 	}
 	else
 	{

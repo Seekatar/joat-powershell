@@ -16,7 +16,11 @@ Describe "StringTests" {
     It "RemovesString" {
         Remove-ConfigData -Path $path -Name "String2" | should be $true
         Remove-ConfigData -Path $path -Name "String2" | should be $false
-        Get-ConfigData -Path $path -Name "String2" | should be $null
+        Get-ConfigData -Path $path -Name "String2" -WarningAction "SilentlyContinue" | should be $null
+    }
+    It "TestsNumbers" {
+        Set-ConfigData -Path $path -Name "Num1" -Value 123
+        (Get-ConfigData -Path $path -Name "Num1") | Should be 123
     }
     Remove-Item $path
 }
@@ -107,5 +111,22 @@ Describe "SecureStringTest" {
         $ret = (Get-ConfigData -Path $path -Name "SString" -Decrypt)
         $ret | Should be 'monkey123'
     }
+
+    It "SetStringGetAsSecureString" {
+        Set-ConfigData -Path $path -Name "SecString" -Value "monkey123" -Encrypt
+        $ss = (Get-ConfigData -Path $path -Name "SecString")
+        $ss | Should be 'System.Security.SecureString'
+        $decryptedtString = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss))
+        $decryptedtString | Should be 'monkey123'
+    }
+
+    It "SetStringGetAsSecureNumber" {
+        Set-ConfigData -Path $path -Name "SecString" -Value 123 -Encrypt
+        $ss = (Get-ConfigData -Path $path -Name "SecString")
+        $ss | Should be 'System.Security.SecureString'
+        $decryptedtString = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ss))
+        $decryptedtString | Should be 123
+    }
+
     Remove-Item $path
 }

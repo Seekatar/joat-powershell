@@ -66,12 +66,17 @@ param(
 		$value = ConvertFrom-Json $value
 		$isSecureString = [bool](Get-Member -InputObject $value -Name "Secure-String" -MemberType NoteProperty )
 		$isEncryptedObject = [bool](Get-Member -InputObject $value -Name "Encrypted-Object" -MemberType NoteProperty )
+		$isEncryptedString = [bool](Get-Member -InputObject $value -Name "Encrypted-String" -MemberType NoteProperty )
 		Write-Verbose "isSecureString = $isSecureString isEncryptedObject = $isEncryptedObject"
-		if ( $isSecureString -or $isEncryptedObject)
+		if ( $isSecureString -or $isEncryptedObject -or $isEncryptedString )
 		{
 			if ( $isEncryptedObject )
 			{
 				$value = $value."Encrypted-Object"
+			}
+			elseif ( $isEncryptedString )
+			{
+				$value = $value."Encrypted-String"
 			}
 			else
 			{
