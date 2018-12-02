@@ -47,7 +47,7 @@ if ( -not (Get-Module -Name Pester ) )
 
 Import-Module Pester
 
-$result = Invoke-Pester -OutputFile 'TEST-PesterResults.xml' -OutputFormat 'NUnitXml' -Tags $tags -PassThru
+$result = Invoke-Pester -OutputFile 'TEST-PesterResults.xml' -OutputFormat 'NUnitXml' -Tags $tags -PassThru -ExcludeTag PSSA
 if ( $result.FailedCount )
 {
     throw "Pester tests failed.  Count is $($result.FailedCount)"
