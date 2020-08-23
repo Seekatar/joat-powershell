@@ -41,10 +41,10 @@ function makePaths
     $pathObjs = @()
     foreach ($path in $paths.Keys )
     {
-        foreach ($methodName in $yaml.paths.$path.Keys )
+        foreach ($methodName in $paths.$path.Keys )
         {
             $method = $yaml.paths.$path[$methodName]
-            $pathObj = @{
+            $pathObjs += @{
                 path        = $path
                 method      = $methodName.ToUpper()
                 description = $method["description"]
@@ -55,7 +55,6 @@ function makePaths
                 tags        = $method["tags"]
             }
         }
-        $pathObjs += $pathObj
     }
     $pathObjs
 }
