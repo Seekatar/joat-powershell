@@ -1,3 +1,15 @@
+<#
+.SYNOPSIS
+Get function objects from an OAS Yaml file
+
+.DESCRIPTION
+Creates an PSCustom object for every call.  Used as input to New-OasFunction
+
+.EXAMPLE
+$Fname = "C:\code\OktaPosh\okta_doc\api.yaml"
+$yaml = ConvertFrom-Yaml (gc $Fname -raw)
+$apiCalls = c:\code\joat-powershell\Get-OasMethods.ps1 -Yaml $yaml
+#>
 [CmdletBinding()]
 param (
     [Parameter(Mandatory,ParameterSetName="FName")]
@@ -17,11 +29,15 @@ function makeParameters
     $params = @()
     foreach ($parameter in $Parameters )
     {
+        $type = $parameter["type"]
+        if (!$type) {
+            $type = ($parameter["schema"]['$ref'] -split '/')[-1]
+        }
         $params += [PSCustomObject]@{
             default = $parameter["default"]
             in = $parameter["in"]
             name = $parameter["name"]
-            type = $parameter["type"]
+            type = $type
             description = $parameter["description"]
             required = $parameter["required"] ?? $false
         }
@@ -48,11 +64,13 @@ function makePaths
                 path        = $path
                 method      = $methodName.ToUpper()
                 description = $method["description"]
+                operationId = $method["operationId"]
                 consumes    = $method["consumes"]
                 produces    = $method["produces"]
                 parameters  = makeParameters $method.parameters
                 summary     = $method["summary"]
-                tags        = $method["tags"]
+                tag         = $method["tags"] | Select-Object -First 1
+                responses   = $method["responses"]
             }
         }
     }
