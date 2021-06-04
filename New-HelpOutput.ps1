@@ -14,15 +14,31 @@ param(
 [string[]] $Groups
 )
 
+$ErrorActionPreference = 'Stop'
 Push-Location $Folder
 
+function Get-CommandGroups
+{
+[CmdletBinding()]
+param(
+    [Parameter(ValueFromPipeline)]
+    $fn
+)
+
+process
+{
+    Set-StrictMode -Version Latest
+    Get-GroupName $fn |  Select-Object @{n='c';e={$fn}},@{n='t';e={ $_ }}
+}
+
+}
 function Get-GroupName
 {
 [CmdletBinding()]
 param($command)
-    if ($_.name -cmatch "-$GroupPrefix([A-Z][\w]+)") {
+    if ($command.name -cmatch "-$GroupPrefix([A-Z][\w]+)") {
         $noun = $matches[1]
-        ($Groups | Where-Object { $noun.StartsWith($_) }) ?? "Misc"
+        ($Groups | Where-Object { $noun -like "*$_*"} ) ?? "Misc"
     } else {
         "Misc"
     }
@@ -56,11 +72,12 @@ Function Groups:
             "* [$_](#${_}-Functions)"
         }
         $commands = Get-Command -Module $module
-        $commandsGroups = $commands | Select-Object @{n='c';e={$_}},@{n='t';e={ Get-GroupName $_ }} | Group-Object t
+        Write-Verbose ($commands | Get-CommandGroups | out-string)
+        $commandsGroups = $commands | Get-CommandGroups | Group-Object t
 
         $commandsGroups | ForEach-Object {
             if ($commandsGroups.Count -gt 1) {
-                "`n## $($_.name) Functions`n"
+                "`n## $($_.name) Functions`n "
             }
             @"
 Command     | Synopsis
